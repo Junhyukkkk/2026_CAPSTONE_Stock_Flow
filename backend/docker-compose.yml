@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  alpaca-collector:
+    build: .
+    container_name: alpaca-collector
+    ports:
+      - "8080:8080"
+    environment:
+      - ALPACA_API_KEY=${ALPACA_API_KEY}
+      - ALPACA_API_SECRET=${ALPACA_API_SECRET}
+      - ALPACA_WEBSOCKET_URL=wss://stream.data.alpaca.markets/v2/iex
+    restart: unless-stopped

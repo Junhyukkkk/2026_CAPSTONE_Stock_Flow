@@ -1,0 +1,39 @@
+#Environment
+.env                                                                                                                                                                                                                                                                                               
+.env.local                                                                                                                                                                                                                                                                                                        
+.env.*.local                                                                                                                                                                                                                                                                                                      
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Java / Gradle
+*.class
+*.jar
+*.war
+build/
+.gradle/
+out/
+
+# Node.js (frontend용)
+node_modules/
+dist/
+.next/
+.nuxt/
+
+# Logs
+*.log
+logs/
+
+# Test
+coverage/
+*.lcov
+
+# Claude Code
+.claude/
