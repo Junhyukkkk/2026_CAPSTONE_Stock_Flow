@@ -1,0 +1,27 @@
+apply plugin: 'org.springframework.boot'
+
+dependencies {
+    implementation project(':stockflow-core')
+
+    // Web (내장 서버)
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // Kafka
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // Redis
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // WebSocket (STOMP)
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+
+    // JSON
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // JPA + PostgreSQL (TimescaleDB) - Storage Consumer용
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // Test
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+}

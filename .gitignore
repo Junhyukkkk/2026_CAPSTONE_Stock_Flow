@@ -37,3 +37,6 @@ coverage/
 
 # Claude Code
 .claude/
+
+STOCKFLOW_MULTI_MODULE_GUIDE.md
+STOCKFLOW_REALTIME_GUIDE.md

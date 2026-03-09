@@ -1,1 +1,6 @@
-rootProject.name = 'AlpacaCollector'
+rootProject.name = 'stockflow'
+
+include 'stockflow-core'
+include 'stockflow-api'
+include 'stockflow-realtime'
+include 'stockflow-batch'
