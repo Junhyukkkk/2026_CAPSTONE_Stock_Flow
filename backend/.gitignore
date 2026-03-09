@@ -42,3 +42,6 @@ out/
 ### Environment ###
 .env
 README.md
+
+### Migration Backup ###
+src_backup/
