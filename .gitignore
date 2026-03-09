@@ -1,7 +1,9 @@
 #Environment
-.env                                                                                                                                                                                                                                                                                               
-.env.local                                                                                                                                                                                                                                                                                                        
-.env.*.local                                                                                                                                                                                                                                                                                                      
+.env
+.env.local
+.env.*.local
+.env.save
+.env.*.save                                                                                                                                                                                                                                                                                                      
 # IDE
 .idea/
 .vscode/
@@ -20,6 +22,17 @@ Thumbs.db
 build/
 .gradle/
 out/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
 
 # Node.js (frontend용)
 node_modules/
