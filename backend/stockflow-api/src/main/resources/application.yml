@@ -19,14 +19,6 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
 
-# Alpaca API Configuration
-alpaca:
-  api:
-    key: ${ALPACA_API_KEY:your-api-key}
-    secret: ${ALPACA_API_SECRET:your-api-secret}
-  websocket:
-    url: ${ALPACA_WEBSOCKET_URL:wss://stream.data.alpaca.markets/v2/iex}
-
 logging:
   level:
     com.stockflow: DEBUG
