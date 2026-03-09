@@ -1,0 +1,40 @@
+server:
+  port: 0 # 랜덤 포트 사용
+
+spring:
+  application:
+    name: stockflow-realtime-test
+
+  kafka:
+    bootstrap-servers: ${spring.embedded.kafka.brokers}
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      group:
+        realtime: test-realtime-group
+        storage: test-storage-group
+    topic:
+      normalized: market.normalized
+      dlq: market.dlq
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 3000ms
+
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+logging:
+  level:
+    com.stockflow: DEBUG
+    org.springframework.kafka: INFO
