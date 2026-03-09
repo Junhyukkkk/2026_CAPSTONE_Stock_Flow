@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # Binance 데이터 수집기
+  binance-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stockflow-binance-collector
+    command: python binance_producer.py
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9093}
+      - BINANCE_TOP_SYMBOLS_LIMIT=${BINANCE_TOP_SYMBOLS_LIMIT:-300}
+      - BINANCE_TOPIC_NAME=${BINANCE_TOPIC_NAME:-market.binance.tick}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - .:/app
+    working_dir: /app
+    networks:
+      - stockflow-network
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Alpaca 데이터 수집기
+  alpaca-collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stockflow-alpaca-collector
+    command: python alpaca_producer.py
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9093}
+      - ALPACA_API_KEY=${ALPACA_API_KEY}
+      - ALPACA_API_SECRET=${ALPACA_API_SECRET}
+      - ALPACA_WEBSOCKET_URL=${ALPACA_WEBSOCKET_URL:-wss://stream.data.alpaca.markets/v2/iex}
+      - ALPACA_TOPIC_NAME=${ALPACA_TOPIC_NAME:-market.alpaca.tick}
+      - ALPACA_SUBSCRIBE_ALL_STOCKS=${ALPACA_SUBSCRIBE_ALL_STOCKS:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - .:/app
+    working_dir: /app
+    networks:
+      - stockflow-network
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  stockflow-network:
+    external: true
+    name: stockflow_default
