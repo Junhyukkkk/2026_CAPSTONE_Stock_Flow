@@ -1,0 +1,18 @@
+version: '3'
+services:
+  collector:
+    image: python:3.9-slim
+    container_name: coin-collector
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: >
+      sh -c "pip install confluent-kafka requests websockets && python binance_producer.py"
+    networks:
+      - kafka_net
+    restart: always
+
+networks:
+  kafka_net:
+    external: true
+    name: kafka_default
