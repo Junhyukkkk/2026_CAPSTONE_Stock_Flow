@@ -43,6 +43,7 @@ services:
       - ALPACA_WEBSOCKET_URL=${ALPACA_WEBSOCKET_URL:-wss://stream.data.alpaca.markets/v2/iex}
       - ALPACA_TOPIC_NAME=${ALPACA_TOPIC_NAME:-market.normalized}
       - ALPACA_SUBSCRIBE_ALL_STOCKS=${ALPACA_SUBSCRIBE_ALL_STOCKS:-true}
+      - ALPACA_SUBSCRIBE_SYMBOLS=${ALPACA_SUBSCRIBE_SYMBOLS:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - .:/app
