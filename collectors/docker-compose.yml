@@ -9,9 +9,9 @@ services:
     container_name: stockflow-binance-collector
     command: python binance_producer.py
     environment:
-      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9093}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
       - BINANCE_TOP_SYMBOLS_LIMIT=${BINANCE_TOP_SYMBOLS_LIMIT:-300}
-      - BINANCE_TOPIC_NAME=${BINANCE_TOPIC_NAME:-market.binance.tick}
+      - BINANCE_TOPIC_NAME=${BINANCE_TOPIC_NAME:-market.normalized}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - .:/app
@@ -19,8 +19,9 @@ services:
     networks:
       - stockflow-network
     restart: unless-stopped
-    depends_on:
-      - kafka
+    # Kafka는 backend/infra에서 실행 중
+    # depends_on:
+    #   - kafka
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 30s
@@ -36,12 +37,13 @@ services:
     container_name: stockflow-alpaca-collector
     command: python alpaca_producer.py
     environment:
-      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9093}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
       - ALPACA_API_KEY=${ALPACA_API_KEY}
       - ALPACA_API_SECRET=${ALPACA_API_SECRET}
       - ALPACA_WEBSOCKET_URL=${ALPACA_WEBSOCKET_URL:-wss://stream.data.alpaca.markets/v2/iex}
-      - ALPACA_TOPIC_NAME=${ALPACA_TOPIC_NAME:-market.alpaca.tick}
+      - ALPACA_TOPIC_NAME=${ALPACA_TOPIC_NAME:-market.normalized}
       - ALPACA_SUBSCRIBE_ALL_STOCKS=${ALPACA_SUBSCRIBE_ALL_STOCKS:-true}
+      - ALPACA_SUBSCRIBE_SYMBOLS=${ALPACA_SUBSCRIBE_SYMBOLS:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - .:/app
@@ -49,8 +51,9 @@ services:
     networks:
       - stockflow-network
     restart: unless-stopped
-    depends_on:
-      - kafka
+    # Kafka는 backend/infra에서 실행 중
+    # depends_on:
+    #   - kafka
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 30s
@@ -61,4 +64,4 @@ services:
 networks:
   stockflow-network:
     external: true
-    name: stockflow_default
+    name: infra_default

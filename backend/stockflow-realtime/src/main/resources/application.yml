@@ -4,12 +4,28 @@ server:
 spring:
   application:
     name: stockflow-realtime
+  main:
+    allow-bean-definition-overriding: true
 
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       auto-offset-reset: latest
       enable-auto-commit: false
+      group:
+        realtime: ${KAFKA_CONSUMER_GROUP_REALTIME:realtime-group}
+        storage: ${KAFKA_CONSUMER_GROUP_STORAGE:storage-group}
+      # 배치 처리 설정
+      max-poll-records: ${KAFKA_CONSUMER_MAX_POLL_RECORDS:100}
+      fetch-min-size: ${KAFKA_CONSUMER_FETCH_MIN_SIZE:1}
+      fetch-max-wait: ${KAFKA_CONSUMER_FETCH_MAX_WAIT:500}
+    topic:
+      normalized: ${KAFKA_TOPIC_NORMALIZED:market.normalized}
+      dlq: ${KAFKA_TOPIC_DLQ:market.dlq}
+    # 배치 처리 설정
+    batch:
+      size: ${KAFKA_BATCH_SIZE:100}
+      timeout-ms: ${KAFKA_BATCH_TIMEOUT_MS:1000}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -27,7 +43,7 @@ spring:
           max-wait: 2000ms
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:stockflow}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:stockflow}
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
@@ -36,6 +52,34 @@ spring:
     hibernate:
       ddl-auto: none
     show-sql: false
+    properties:
+      hibernate:
+        # 트랜잭션 설정
+        connection:
+          provider_disables_autocommit: true
+        # 배치 처리 최적화
+        jdbc:
+          batch_size: ${JPA_BATCH_SIZE:50}
+          order_inserts: true
+          order_updates: true
+        # 성능 최적화
+        format_sql: false
+
+# Actuator 설정
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus,info
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: ${spring.application.name}
 
 logging:
   level:

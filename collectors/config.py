@@ -14,7 +14,7 @@ class Config:
     """애플리케이션 설정"""
     
     # Kafka 설정
-    KAFKA_BOOTSTRAP_SERVERS: str = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9093')
+    KAFKA_BOOTSTRAP_SERVERS: str = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092')
     KAFKA_CLIENT_ID_PREFIX: str = os.getenv('KAFKA_CLIENT_ID_PREFIX', 'stockflow-collector')
     
     # Kafka Producer 설정
@@ -29,7 +29,7 @@ class Config:
     # Binance 설정
     BINANCE_TOP_SYMBOLS_LIMIT: int = int(os.getenv('BINANCE_TOP_SYMBOLS_LIMIT', '300'))
     BINANCE_SYMBOL_REFRESH_INTERVAL_HOURS: int = int(os.getenv('BINANCE_SYMBOL_REFRESH_INTERVAL_HOURS', '1'))
-    BINANCE_TOPIC_NAME: str = os.getenv('BINANCE_TOPIC_NAME', 'market.binance.tick')
+    BINANCE_TOPIC_NAME: str = os.getenv('BINANCE_TOPIC_NAME', 'market.normalized')
     
     # Alpaca 설정
     ALPACA_API_KEY: Optional[str] = os.getenv('ALPACA_API_KEY')
@@ -38,7 +38,7 @@ class Config:
         'ALPACA_WEBSOCKET_URL', 
         'wss://stream.data.alpaca.markets/v2/iex'
     )
-    ALPACA_TOPIC_NAME: str = os.getenv('ALPACA_TOPIC_NAME', 'market.alpaca.tick')
+    ALPACA_TOPIC_NAME: str = os.getenv('ALPACA_TOPIC_NAME', 'market.normalized')
     
     # DLQ 설정
     DLQ_TOPIC_NAME: str = os.getenv('DLQ_TOPIC_NAME', 'market.dlq')

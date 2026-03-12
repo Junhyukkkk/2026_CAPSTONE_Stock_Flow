@@ -8,6 +8,8 @@ dependencies {
 
     // Kafka
     implementation 'org.springframework.kafka:spring-kafka'
+    // Snappy 압축 지원
+    implementation 'org.xerial.snappy:snappy-java:1.1.10.5'
 
     // Redis
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
@@ -22,6 +24,19 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     runtimeOnly 'org.postgresql:postgresql'
 
+    // Actuator (모니터링 및 헬스체크)
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    
+    // Micrometer (메트릭 수집)
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+
     // Test
     testImplementation 'org.springframework.kafka:spring-kafka-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.testcontainers:kafka'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'org.mockito:mockito-core'
+    testImplementation 'org.mockito:mockito-junit-jupiter'
+    testImplementation 'com.h2database:h2' // 인메모리 DB 테스트용
 }
