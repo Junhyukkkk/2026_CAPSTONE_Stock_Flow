@@ -3,6 +3,7 @@ package com.stockflow.realtime.consumer;
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.realtime.performance.PerformanceMetrics;
 import com.stockflow.realtime.retry.RetryableProcessor;
+import com.stockflow.realtime.service.RedisPriceService;
 import com.stockflow.realtime.transaction.RealtimeTransactionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,12 +33,10 @@ public class RealtimeConsumer {
     private final RetryableProcessor retryableProcessor;
     private final PerformanceMetrics performanceMetrics;
     private final RealtimeTransactionManager transactionManager;
+    private final RedisPriceService redisPriceService;
 
     @Value("${spring.kafka.consumer.group.realtime:realtime-group}")
     private String consumerGroup;
-
-    // TODO: Redis 서비스 주입 (다음 단계에서 구현)
-    // private final RedisService redisService;
 
     /**
      * 실시간 거래 데이터 수신 및 처리
@@ -95,14 +94,18 @@ public class RealtimeConsumer {
 
     /**
      * 실제 거래 데이터 처리 로직
-     * 
+     *
+     * 1. 전일 종가 조회
+     * 2. 등락률 계산
+     * 3. Redis 캐싱 (price:latest:{symbol})
+     * 4. Pub/Sub 발행 (price:{symbol})
+     *
      * @param trade 처리할 거래 데이터
      */
     private void processTrade(NormalizedTradeDTO trade) {
-        // TODO: Redis에 저장 (다음 단계에서 구현)
-        // redisService.saveRealtimeTrade(trade);
-        
-        log.trace("Processing trade: symbol={}, price={}", 
+        redisPriceService.processRealtimeTrade(trade);
+
+        log.trace("Processing trade: symbol={}, price={}",
             trade.getSymbol(), trade.getPrice());
     }
 }
