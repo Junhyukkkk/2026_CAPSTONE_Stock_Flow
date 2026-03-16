@@ -28,6 +28,9 @@ public class NormalizedTradeDTO {
     private BigDecimal volume;   // 체결 수량
 
     @NotBlank
+    private String tradeId;      // 원본 거래 ID (source + tradeId로 중복 검사)
+
+    @NotBlank
     private String exchange;     // 거래소 (BINANCE, IEX, NYSE 등)
 
     @NotNull
