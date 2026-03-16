@@ -6,8 +6,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.math.BigDecimal;
+import java.util.Map;
 
 /**
  * 가격 조회 API
@@ -37,5 +42,52 @@ public class PriceController {
         }
 
         return ResponseEntity.ok(snapshot);
+    }
+
+    /**
+     * 전일 종가 조회
+     *
+     * @param symbol 종목 심볼
+     * @return 전일 종가
+     */
+    @GetMapping("/{symbol}/prev-close")
+    public ResponseEntity<Map<String, Object>> getPreviousClose(@PathVariable String symbol) {
+        BigDecimal prevClose = redisPriceService.getPreviousClose(symbol.toUpperCase());
+
+        if (prevClose == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "symbol", symbol.toUpperCase(),
+                "previousClose", prevClose
+        ));
+    }
+
+    /**
+     * 전일 종가 설정
+     *
+     * @param symbol 종목 심볼
+     * @param request 전일 종가 (price 필드)
+     */
+    @PutMapping("/{symbol}/prev-close")
+    public ResponseEntity<Map<String, Object>> setPreviousClose(
+            @PathVariable String symbol,
+            @RequestBody Map<String, BigDecimal> request) {
+
+        BigDecimal price = request.get("price");
+        if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "price must be a positive number"
+            ));
+        }
+
+        redisPriceService.setPreviousClose(symbol.toUpperCase(), price);
+
+        return ResponseEntity.ok(Map.of(
+                "symbol", symbol.toUpperCase(),
+                "previousClose", price,
+                "message", "Previous close price set successfully"
+        ));
     }
 }
