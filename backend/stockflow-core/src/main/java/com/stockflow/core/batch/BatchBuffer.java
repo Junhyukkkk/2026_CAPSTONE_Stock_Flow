@@ -1,4 +1,4 @@
-package com.stockflow.realtime.batch;
+package com.stockflow.core.batch;
 
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import lombok.extern.slf4j.Slf4j;
@@ -10,7 +10,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 배치 버퍼
- * 
+ *
  * 메시지를 버퍼에 모아서 배치로 처리
  * Thread-safe 보장
  */
@@ -24,7 +24,7 @@ public class BatchBuffer {
 
     /**
      * 메시지 추가
-     * 
+     *
      * @param trade 거래 데이터
      * @return 현재 버퍼 크기
      */
@@ -40,7 +40,7 @@ public class BatchBuffer {
 
     /**
      * 버퍼에서 모든 메시지 가져오기 (버퍼 비우기)
-     * 
+     *
      * @return 메시지 리스트
      */
     public List<NormalizedTradeDTO> flush() {

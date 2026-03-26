@@ -1,7 +1,7 @@
 package com.stockflow.realtime.consumer;
 
 import com.stockflow.core.dto.NormalizedTradeDTO;
-import com.stockflow.realtime.performance.PerformanceMetrics;
+import com.stockflow.core.metrics.PerformanceMetrics;
 import com.stockflow.realtime.retry.RetryableProcessor;
 import com.stockflow.realtime.service.RedisPriceService;
 import com.stockflow.realtime.transaction.RealtimeTransactionManager;

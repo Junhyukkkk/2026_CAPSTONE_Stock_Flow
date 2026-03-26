@@ -1,20 +1,15 @@
-package com.stockflow.realtime.batch;
+package com.stockflow.core.batch;
 
-import com.stockflow.core.dto.NormalizedTradeDTO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
  * 배치 처리기
- * 
+ *
  * 메시지를 버퍼에 모아서 배치로 처리
  * 시간 기반 또는 크기 기반으로 배치 생성
  */
@@ -22,15 +17,15 @@ import java.util.function.Consumer;
 @Component
 public class BatchProcessor {
 
-    @Value("${spring.kafka.batch.size:100}")
+    @Value("${batch.size:100}")
     private int batchSize;
 
-    @Value("${spring.kafka.batch.timeout-ms:1000}")
+    @Value("${batch.timeout-ms:1000}")
     private long batchTimeoutMs;
 
     /**
      * 배치로 메시지 처리
-     * 
+     *
      * @param messages 메시지 리스트
      * @param processor 배치 처리 로직
      * @param <T> 메시지 타입
@@ -41,7 +36,7 @@ public class BatchProcessor {
         }
 
         log.debug("Processing batch: size={}", messages.size());
-        
+
         try {
             processor.accept(messages);
             log.debug("Successfully processed batch: size={}", messages.size());
@@ -53,7 +48,7 @@ public class BatchProcessor {
 
     /**
      * 배치 조건 확인
-     * 
+     *
      * @param currentSize 현재 배치 크기
      * @param elapsedTime 경과 시간 (밀리초)
      * @return 배치 처리 여부
@@ -64,13 +59,13 @@ public class BatchProcessor {
             log.debug("Batch size reached: size={}", currentSize);
             return true;
         }
-        
+
         // 시간 기반: 타임아웃 시간 경과
         if (elapsedTime >= batchTimeoutMs) {
             log.debug("Batch timeout reached: elapsed={}ms", elapsedTime);
             return true;
         }
-        
+
         return false;
     }
 
