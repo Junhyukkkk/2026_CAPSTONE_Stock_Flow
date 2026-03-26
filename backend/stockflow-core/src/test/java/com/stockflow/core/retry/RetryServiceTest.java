@@ -1,8 +1,7 @@
-package com.stockflow.realtime.retry;
+package com.stockflow.core.retry;
 
-import com.stockflow.realtime.error.ErrorClassifier;
-import com.stockflow.realtime.error.ErrorType;
-import org.junit.jupiter.api.BeforeEach;
+import com.stockflow.core.error.ErrorClassifier;
+import com.stockflow.core.error.ErrorType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
