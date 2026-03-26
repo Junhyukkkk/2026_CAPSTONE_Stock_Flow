@@ -1,6 +1,6 @@
 package com.stockflow.realtime.consumer;
 
-import com.stockflow.core.batch.BatchProcessor;
+import com.stockflow.core.util.BatchProcessor;
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.core.metrics.PerformanceMetrics;
 import com.stockflow.realtime.retry.RetryableProcessor;

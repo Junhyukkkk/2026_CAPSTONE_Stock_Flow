@@ -1,4 +1,4 @@
-package com.stockflow.core.batch;
+package com.stockflow.core.util;
 
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import lombok.extern.slf4j.Slf4j;
