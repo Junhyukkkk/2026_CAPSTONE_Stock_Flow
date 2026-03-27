@@ -86,3 +86,13 @@ logging:
     com.stockflow: DEBUG
     org.springframework.kafka: INFO
     org.springframework.data.redis: INFO
+
+# Consumer 코드가 참조하는 property path (spring.kafka와 별도)
+kafka:
+  topic:
+    normalized: market.normalized.test
+    dlq: market.dlq.test
+  consumer:
+    group:
+      realtime: realtime-test-group
+      storage: storage-test-group
