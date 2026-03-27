@@ -7,20 +7,23 @@ import com.stockflow.realtime.dlq.DLQService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * 재시도 가능한 메시지 처리기
- * 
+ * 재시도 가능한 메시지 처리기 (test 프로필용)
+ *
+ * 비동기 Retry 토픽 방식으로 리밸런싱 방지
  * Consumer에서 사용하는 재시도 로직을 캡슐화
  */
 @Slf4j
 @Component
+@Profile("test")
 @RequiredArgsConstructor
-public class RetryableProcessor {
+public class RetryableProcessor implements RetryableProcessorInterface {
 
     private final ErrorClassifier errorClassifier;
     private final DLQService dlqService;

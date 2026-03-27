@@ -4,6 +4,7 @@ import com.stockflow.core.dto.NormalizedTradeDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.springframework.context.annotation.Profile;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -17,9 +18,12 @@ import java.util.List;
  *
  * 동기 재시도 대신 별도 토픽으로 실패 메시지를 전송하여
  * Consumer의 poll 간격을 초과하지 않도록 함 (리밸런싱 방지)
+ *
+ * test 프로필에서만 활성화
  */
 @Slf4j
 @Service
+@Profile("test")
 @RequiredArgsConstructor
 public class RetryTopicService {
 

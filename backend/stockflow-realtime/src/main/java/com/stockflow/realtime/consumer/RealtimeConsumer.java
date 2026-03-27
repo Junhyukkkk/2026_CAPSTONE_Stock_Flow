@@ -2,7 +2,7 @@ package com.stockflow.realtime.consumer;
 
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.core.metrics.PerformanceMetrics;
-import com.stockflow.realtime.retry.RetryableProcessor;
+import com.stockflow.realtime.retry.RetryableProcessorInterface;
 import com.stockflow.realtime.service.RedisPriceService;
 import com.stockflow.realtime.transaction.RealtimeTransactionManager;
 import lombok.RequiredArgsConstructor;
@@ -30,7 +30,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class RealtimeConsumer {
 
-    private final RetryableProcessor retryableProcessor;
+    private final RetryableProcessorInterface retryableProcessor;
     private final PerformanceMetrics performanceMetrics;
     private final RealtimeTransactionManager transactionManager;
     private final RedisPriceService redisPriceService;
