@@ -1,11 +1,12 @@
-package com.stockflow.realtime.error;
+package com.stockflow.realtime.dlq;
 
 import com.stockflow.core.dto.DLQMessage;
+import com.stockflow.core.error.ErrorClassifier;
+import com.stockflow.core.error.ErrorType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -13,7 +14,7 @@ import java.util.Map;
 
 /**
  * Dead Letter Queue (DLQ) 전송 서비스
- * 
+ *
  * 실패한 메시지를 DLQ 토픽으로 전송
  */
 @Slf4j
@@ -29,7 +30,7 @@ public class DLQService {
 
     /**
      * 실패한 메시지를 DLQ로 전송
-     * 
+     *
      * @param originalTopic 원본 토픽
      * @param originalPartition 원본 파티션
      * @param originalOffset 원본 오프셋
@@ -78,7 +79,7 @@ public class DLQService {
 
     /**
      * 배치 메시지를 DLQ로 전송
-     * 
+     *
      * @param originalTopic 원본 토픽
      * @param originalMessages 원본 메시지 리스트
      * @param exception 발생한 예외
@@ -95,7 +96,7 @@ public class DLQService {
         // 배치의 각 메시지를 개별적으로 DLQ에 전송
         for (int i = 0; i < originalMessages.size(); i++) {
             Object message = originalMessages.get(i);
-            
+
             DLQMessage dlqMessage = DLQMessage.builder()
                 .originalTopic(originalTopic)
                 .originalPartition(null) // 배치에서는 파티션 정보 없음

@@ -1,6 +1,6 @@
 package com.stockflow.realtime.monitoring;
 
-import com.stockflow.realtime.performance.PerformanceMetrics;
+import com.stockflow.core.metrics.PerformanceMetrics;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
