@@ -19,6 +19,8 @@ spring:
       max-poll-records: ${KAFKA_CONSUMER_MAX_POLL_RECORDS:100}
       fetch-min-size: ${KAFKA_CONSUMER_FETCH_MIN_SIZE:1}
       fetch-max-wait: ${KAFKA_CONSUMER_FETCH_MAX_WAIT:500}
+      properties:
+        max.poll.interval.ms: ${KAFKA_MAX_POLL_INTERVAL_MS:300000}
     topic:
       normalized: ${KAFKA_TOPIC_NORMALIZED:market.normalized}
       dlq: ${KAFKA_TOPIC_DLQ:market.dlq}
@@ -86,3 +88,12 @@ logging:
     com.stockflow: DEBUG
     org.springframework.kafka: INFO
     org.springframework.data.redis: INFO
+
+# Retry Policy 설정 (RetryPolicyConfig에서 참조)
+retry:
+  initial-delay-ms: ${RETRY_INITIAL_DELAY_MS:1000}
+  multiplier: ${RETRY_MULTIPLIER:2.0}
+  max-retries: ${RETRY_MAX_RETRIES:3}
+  max-delay-ms: ${RETRY_MAX_DELAY_MS:60000}
+  use-jitter: ${RETRY_USE_JITTER:true}
+  jitter-ratio: ${RETRY_JITTER_RATIO:0.2}
