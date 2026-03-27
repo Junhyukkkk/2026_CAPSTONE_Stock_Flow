@@ -95,6 +95,7 @@ kafka:
   topic:
     normalized: market.normalized.test
     dlq: market.dlq.test
+    retry: market.retry.test
   consumer:
     group:
       realtime: realtime-test-group

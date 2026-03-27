@@ -35,7 +35,7 @@ public class TestKafkaProducerConfig {
     }
 
     @Bean
-    public KafkaTemplate<String, NormalizedTradeDTO> testKafkaTemplate() {
+    public KafkaTemplate<String, NormalizedTradeDTO> kafkaTemplate() {
         return new KafkaTemplate<>(testProducerFactory());
     }
 }

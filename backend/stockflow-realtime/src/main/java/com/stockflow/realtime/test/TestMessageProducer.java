@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequiredArgsConstructor
 public class TestMessageProducer {
 
-    private final KafkaTemplate<String, NormalizedTradeDTO> testKafkaTemplate;
+    private final KafkaTemplate<String, NormalizedTradeDTO> kafkaTemplate;
 
     @Value("${spring.kafka.topic.normalized:market.normalized.test}")
     private String normalizedTopic;
@@ -54,7 +54,7 @@ public class TestMessageProducer {
             NormalizedTradeDTO trade = createValidMessage(i);
 
             CompletableFuture<SendResult<String, NormalizedTradeDTO>> future =
-                testKafkaTemplate.send(normalizedTopic, trade.getSymbol(), trade);
+                kafkaTemplate.send(normalizedTopic, trade.getSymbol(), trade);
 
             future.whenComplete((result, ex) -> {
                 if (ex != null) {
@@ -90,7 +90,7 @@ public class TestMessageProducer {
             NormalizedTradeDTO trade = createInvalidMessage(i);
 
             CompletableFuture<SendResult<String, NormalizedTradeDTO>> future =
-                testKafkaTemplate.send(normalizedTopic, trade.getSymbol(), trade);
+                kafkaTemplate.send(normalizedTopic, trade.getSymbol(), trade);
 
             future.whenComplete((result, ex) -> {
                 if (ex != null) {
