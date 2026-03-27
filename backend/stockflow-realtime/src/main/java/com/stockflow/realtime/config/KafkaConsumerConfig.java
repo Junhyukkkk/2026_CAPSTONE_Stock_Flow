@@ -38,6 +38,9 @@ public class KafkaConsumerConfig {
     @Value("${spring.kafka.consumer.fetch-max-wait:500}")
     private int fetchMaxWait;
 
+    @Value("${spring.kafka.consumer.concurrency:4}")
+    private int concurrency;
+
     /**
      * Consumer Factory 설정
      * 
@@ -102,8 +105,8 @@ public class KafkaConsumerConfig {
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
         
         // 동시성 설정 (파티션 수와 동일하게)
-        factory.setConcurrency(4);
-        
+        factory.setConcurrency(concurrency);
+
         return factory;
     }
 
@@ -127,8 +130,8 @@ public class KafkaConsumerConfig {
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
         
         // 동시성 설정
-        factory.setConcurrency(4);
-        
+        factory.setConcurrency(concurrency);
+
         return factory;
     }
 }

@@ -19,6 +19,8 @@ spring:
       max-poll-records: ${KAFKA_CONSUMER_MAX_POLL_RECORDS:100}
       fetch-min-size: ${KAFKA_CONSUMER_FETCH_MIN_SIZE:1}
       fetch-max-wait: ${KAFKA_CONSUMER_FETCH_MAX_WAIT:500}
+      # 동시성 설정 (파티션 수와 맞춤)
+      concurrency: ${KAFKA_CONSUMER_CONCURRENCY:12}
       properties:
         max.poll.interval.ms: ${KAFKA_MAX_POLL_INTERVAL_MS:300000}
     topic:
