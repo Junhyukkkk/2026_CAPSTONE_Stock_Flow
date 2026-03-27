@@ -79,7 +79,8 @@ public class RealtimeConsumer {
         if (success) {
             // 처리 성공 시 커밋
             acknowledgment.acknowledge();
-            performanceMetrics.recordSuccess();
+            performanceMetrics.recordSuccessWithLatency(trade.getTimestamp());
+            //performanceMetrics.recordSuccess();
             performanceMetrics.recordProcessingTime(processingTime);
             log.debug("Successfully processed trade: symbol={}, offset={}, processingTime={}ms", 
                 trade.getSymbol(), offset, processingTime);
