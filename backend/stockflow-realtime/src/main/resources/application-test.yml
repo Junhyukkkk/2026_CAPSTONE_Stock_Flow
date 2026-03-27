@@ -19,6 +19,9 @@ spring:
       max-poll-records: ${KAFKA_CONSUMER_MAX_POLL_RECORDS:100}
       fetch-min-size: ${KAFKA_CONSUMER_FETCH_MIN_SIZE:1}
       fetch-max-wait: ${KAFKA_CONSUMER_FETCH_MAX_WAIT:500}
+      # 리밸런싱 재현용: poll 간격 30초 제한
+      properties:
+        max.poll.interval.ms: 30000
     topic:
       normalized: ${KAFKA_TOPIC_NORMALIZED:market.normalized.test}
       dlq: ${KAFKA_TOPIC_DLQ:market.dlq.test}
@@ -96,3 +99,10 @@ kafka:
     group:
       realtime: realtime-test-group
       storage: storage-test-group
+
+# 리밸런싱 재현용 재시도 설정 (5초 → 25초 → 125초 = 155초 > 30초 max.poll.interval.ms)
+retry:
+  initial-delay-ms: 5000
+  multiplier: 5.0
+  max-retries: 3
+  max-delay-ms: 300000

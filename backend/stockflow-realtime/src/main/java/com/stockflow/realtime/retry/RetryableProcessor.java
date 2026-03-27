@@ -27,6 +27,7 @@ public class RetryableProcessor {
     private final RetryService retryService;
     private final ErrorClassifier errorClassifier;
     private final DLQService dlqService;
+    private final RetryPolicy retryPolicy;
 
     @Value("${spring.kafka.topic.normalized:market.normalized}")
     private String topicName;
@@ -69,7 +70,7 @@ public class RetryableProcessor {
                         return null;
                     },
                     errorType,
-                    null // 기본 정책 사용
+                    retryPolicy
                 );
                 
                 return true;
@@ -146,7 +147,7 @@ public class RetryableProcessor {
                         return null;
                     },
                     errorType,
-                    null // 기본 정책 사용
+                    retryPolicy
                 );
                 
                 return true;
