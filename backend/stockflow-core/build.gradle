@@ -7,6 +7,12 @@ dependencies {
 
     // Jackson (JSON 직렬화/역직렬화)
     implementation 'com.fasterxml.jackson.core:jackson-databind'
+
+    // Spring Context (for @Component, @Service)
+    implementation 'org.springframework:spring-context'
+
+    // Test dependencies
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
 
 jar {

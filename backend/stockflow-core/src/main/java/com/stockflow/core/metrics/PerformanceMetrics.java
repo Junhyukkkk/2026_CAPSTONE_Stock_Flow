@@ -1,4 +1,4 @@
-package com.stockflow.realtime.performance;
+package com.stockflow.core.metrics;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.LongAdder;
 
 /**
  * 성능 메트릭 수집
- * 
+ *
  * 처리량, 지연시간, 에러율 등을 추적
  */
 @Slf4j
@@ -45,17 +45,17 @@ public class PerformanceMetrics {
 
     /**
      * 처리 시간 기록
-     * 
+     *
      * @param processingTimeMs 처리 시간 (밀리초)
      */
     public void recordProcessingTime(long processingTimeMs) {
         processingCount.incrementAndGet();
         totalProcessingTime.add(processingTimeMs);
-        
+
         // 최소/최대 업데이트
-        minProcessingTime.updateAndGet(current -> 
+        minProcessingTime.updateAndGet(current ->
             Math.min(current, processingTimeMs));
-        maxProcessingTime.updateAndGet(current -> 
+        maxProcessingTime.updateAndGet(current ->
             Math.max(current, processingTimeMs));
     }
 

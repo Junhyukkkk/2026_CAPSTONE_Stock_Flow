@@ -1,4 +1,4 @@
-package com.stockflow.realtime.error;
+package com.stockflow.core.error;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -9,7 +9,7 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * 에러 분류기
- * 
+ *
  * 예외를 분석하여 ErrorType으로 분류
  * 재시도 가능 여부를 판단
  */
@@ -19,7 +19,7 @@ public class ErrorClassifier {
 
     /**
      * 예외를 ErrorType으로 분류
-     * 
+     *
      * @param exception 발생한 예외
      * @return ErrorType
      */
@@ -71,7 +71,7 @@ public class ErrorClassifier {
 
     /**
      * 재시도 가능한 에러인지 판단
-     * 
+     *
      * @param errorType 에러 타입
      * @return 재시도 가능 여부
      */
