@@ -4,9 +4,9 @@ import com.stockflow.core.dto.NormalizedTradeDTO;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
@@ -22,7 +22,7 @@ import java.util.Map;
  * test 프로필에서만 활성화
  */
 @Configuration
-@Profile("test")
+@ConditionalOnProperty(name = "retry.mode", havingValue = "async")
 public class TestRetryKafkaConfig {
 
     @Value("${spring.kafka.bootstrap-servers:localhost:9092}")

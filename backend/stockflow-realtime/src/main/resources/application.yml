@@ -93,6 +93,7 @@ logging:
 
 # Retry Policy 설정 (RetryPolicyConfig에서 참조)
 retry:
+  mode: ${RETRY_MODE:sync}
   initial-delay-ms: ${RETRY_INITIAL_DELAY_MS:1000}
   multiplier: ${RETRY_MULTIPLIER:2.0}
   max-retries: ${RETRY_MAX_RETRIES:3}

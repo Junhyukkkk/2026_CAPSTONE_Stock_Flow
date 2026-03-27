@@ -105,6 +105,7 @@ kafka:
 
 # Retry 토픽 방식 설정
 retry:
+  mode: ${RETRY_MODE:sync}
   max-retries: ${RETRY_MAX_RETRIES:3}
   delay-ms: ${RETRY_DELAY_MS:5000}
   initial-delay-ms: ${RETRY_INITIAL_DELAY_MS:1000}

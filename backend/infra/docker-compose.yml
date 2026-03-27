@@ -92,6 +92,7 @@ services:
       - DB_USERNAME=postgres
       - DB_PASSWORD=postgres
       # Retry Policy
+      - RETRY_MODE=${RETRY_MODE:-sync}
       - RETRY_MAX_RETRIES=${RETRY_MAX_RETRIES:-3}
       - RETRY_DELAY_MS=${RETRY_DELAY_MS:-5000}
       - RETRY_INITIAL_DELAY_MS=${RETRY_INITIAL_DELAY_MS:-1000}

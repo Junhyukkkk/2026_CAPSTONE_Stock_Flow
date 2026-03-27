@@ -4,8 +4,8 @@ import com.stockflow.core.dto.NormalizedTradeDTO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.springframework.context.annotation.Profile;
 import org.apache.kafka.common.header.internals.RecordHeader;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
@@ -23,7 +23,7 @@ import java.util.List;
  */
 @Slf4j
 @Service
-@Profile("test")
+@ConditionalOnProperty(name = "retry.mode", havingValue = "async")
 @RequiredArgsConstructor
 public class RetryTopicService {
 

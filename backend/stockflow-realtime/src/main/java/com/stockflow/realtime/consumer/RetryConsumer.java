@@ -8,7 +8,7 @@ import com.stockflow.realtime.service.RedisPriceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
@@ -31,7 +31,7 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-@Profile("test")
+@ConditionalOnProperty(name = "retry.mode", havingValue = "async")
 @RequiredArgsConstructor
 public class RetryConsumer {
 

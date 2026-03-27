@@ -9,7 +9,7 @@ import com.stockflow.realtime.dlq.DLQService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -22,7 +22,7 @@ import java.util.function.Consumer;
  */
 @Slf4j
 @Component
-@Profile("!test")
+@ConditionalOnProperty(name = "retry.mode", havingValue = "sync", matchIfMissing = true)
 @RequiredArgsConstructor
 public class RetryableProcessorDefault implements RetryableProcessorInterface {
 
