@@ -44,6 +44,27 @@ public class PerformanceMetrics {
 
     private static final int MAX_LATENCY_SAMPLES = 100000;
 
+    // Timestamp 단위 판별 기준 (자릿수)
+    private static final long MILLIS_THRESHOLD = 1_000_000_000_000L;      // 13자리 시작 (2001년~)
+    private static final long MICROS_THRESHOLD = 1_000_000_000_000_000L;  // 16자리 시작
+    private static final long NANOS_THRESHOLD = 1_000_000_000_000_000_000L; // 19자리 시작
+
+    /**
+     * timestamp를 밀리초 단위로 정규화
+     * - 나노초 (19자리): /1,000,000
+     * - 마이크로초 (16자리): /1,000
+     * - 밀리초 (13자리): 그대로
+     */
+    private long normalizeToMillis(long timestamp) {
+        if (timestamp >= NANOS_THRESHOLD) {
+            return timestamp / 1_000_000;  // 나노초 → 밀리초
+        } else if (timestamp >= MICROS_THRESHOLD) {
+            return timestamp / 1_000;      // 마이크로초 → 밀리초
+        } else {
+            return timestamp;              // 이미 밀리초
+        }
+    }
+
     /**
      * 처리 성공 기록
      */
@@ -74,11 +95,12 @@ public class PerformanceMetrics {
     /**
      * E2E Latency 기록 (메시지 timestamp → 처리 완료 시점)
      *
-     * @param messageTimestamp 메시지 원본 timestamp (epoch ms)
+     * @param messageTimestamp 메시지 원본 timestamp (자동 단위 감지: ms, μs, ns)
      */
     public void recordE2ELatency(long messageTimestamp) {
         long now = System.currentTimeMillis();
-        long latency = now - messageTimestamp;
+        long timestampMs = normalizeToMillis(messageTimestamp);
+        long latency = now - timestampMs;
 
         e2eLatencyCount.incrementAndGet();
         totalE2ELatency.add(latency);
