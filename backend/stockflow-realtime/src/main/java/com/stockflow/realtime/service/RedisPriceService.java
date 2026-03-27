@@ -50,6 +50,11 @@ public class RedisPriceService {
      * 4. Pub/Sub 발행
      */
     public void processRealtimeTrade(NormalizedTradeDTO trade) {
+        // Price validation
+        if (trade.getPrice() == null || trade.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Invalid price: " + trade.getPrice());
+        }
+
         String symbol = trade.getSymbol();
         BigDecimal currentPrice = trade.getPrice();
 
