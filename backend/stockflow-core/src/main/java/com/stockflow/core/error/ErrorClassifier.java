@@ -78,7 +78,8 @@ public class ErrorClassifier {
     public boolean isRetryable(ErrorType errorType) {
         return errorType == ErrorType.STORAGE_CONNECTION_ERROR ||
                errorType == ErrorType.STORAGE_ERROR ||
-               errorType == ErrorType.TIMEOUT_ERROR;
+               errorType == ErrorType.TIMEOUT_ERROR ||
+               errorType == ErrorType.VALIDATION_ERROR;  // 실험용: 리밸런싱 재현
     }
 
     /**

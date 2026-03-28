@@ -2,7 +2,7 @@ package com.stockflow.realtime.consumer;
 
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.core.metrics.PerformanceMetrics;
-import com.stockflow.realtime.retry.RetryableProcessor;
+import com.stockflow.realtime.retry.RetryableProcessorInterface;
 import com.stockflow.realtime.service.RedisPriceService;
 import com.stockflow.realtime.transaction.RealtimeTransactionManager;
 import lombok.RequiredArgsConstructor;
@@ -30,7 +30,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class RealtimeConsumer {
 
-    private final RetryableProcessor retryableProcessor;
+    private final RetryableProcessorInterface retryableProcessor;
     private final PerformanceMetrics performanceMetrics;
     private final RealtimeTransactionManager transactionManager;
     private final RedisPriceService redisPriceService;
@@ -47,8 +47,8 @@ public class RealtimeConsumer {
      * @param offset 오프셋
      */
     @KafkaListener(
-        topics = "${kafka.topic.normalized:market.normalized}",
-        groupId = "${kafka.consumer.group.realtime:realtime-group}",
+        topics = "${spring.kafka.topic.normalized:market.normalized}",
+        groupId = "${spring.kafka.consumer.group.realtime:realtime-group}",
         containerFactory = "kafkaListenerContainerFactory"
     )
     public void consumeRealtimeTrade(
@@ -79,7 +79,8 @@ public class RealtimeConsumer {
         if (success) {
             // 처리 성공 시 커밋
             acknowledgment.acknowledge();
-            performanceMetrics.recordSuccess();
+            performanceMetrics.recordSuccessWithLatency(trade.getTimestamp());
+            //performanceMetrics.recordSuccess();
             performanceMetrics.recordProcessingTime(processingTime);
             log.debug("Successfully processed trade: symbol={}, offset={}, processingTime={}ms", 
                 trade.getSymbol(), offset, processingTime);

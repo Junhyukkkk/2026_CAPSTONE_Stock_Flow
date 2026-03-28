@@ -3,7 +3,7 @@ package com.stockflow.realtime.consumer;
 import com.stockflow.core.util.BatchProcessor;
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.core.metrics.PerformanceMetrics;
-import com.stockflow.realtime.retry.RetryableProcessor;
+import com.stockflow.realtime.retry.RetryableProcessorInterface;
 import com.stockflow.realtime.transaction.RealtimeTransactionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,7 +31,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class StorageConsumer {
 
-    private final RetryableProcessor retryableProcessor;
+    private final RetryableProcessorInterface retryableProcessor;
     private final BatchProcessor batchProcessor;
     private final PerformanceMetrics performanceMetrics;
     private final RealtimeTransactionManager transactionManager;
@@ -51,8 +51,8 @@ public class StorageConsumer {
      * @param acknowledgment 수동 커밋을 위한 acknowledgment
      */
     @KafkaListener(
-        topics = "${kafka.topic.normalized:market.normalized}",
-        groupId = "${kafka.consumer.group.storage:storage-group}",
+        topics = "${spring.kafka.topic.normalized:market.normalized}",
+        groupId = "${spring.kafka.consumer.group.storage:storage-group}",
         containerFactory = "batchKafkaListenerContainerFactory"
     )
     public void consumeStorageTrades(
