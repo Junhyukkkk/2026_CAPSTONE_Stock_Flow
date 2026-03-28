@@ -51,8 +51,8 @@ public class StorageConsumer {
      * @param acknowledgment 수동 커밋을 위한 acknowledgment
      */
     @KafkaListener(
-        topics = "${kafka.topic.normalized:market.normalized}",
-        groupId = "${kafka.consumer.group.storage:storage-group}",
+        topics = "${spring.kafka.topic.normalized:market.normalized}",
+        groupId = "${spring.kafka.consumer.group.storage:storage-group}",
         containerFactory = "batchKafkaListenerContainerFactory"
     )
     public void consumeStorageTrades(

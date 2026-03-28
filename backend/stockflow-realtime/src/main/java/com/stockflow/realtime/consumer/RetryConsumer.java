@@ -40,7 +40,7 @@ public class RetryConsumer {
     private final RetryTopicService retryTopicService;
     private final PerformanceMetrics performanceMetrics;
 
-    @Value("${kafka.topic.normalized:market.normalized.test}")
+    @Value("${spring.kafka.topic.normalized:market.normalized}")
     private String originalTopic;
 
     @Value("${retry.delay-ms:5000}")
@@ -52,8 +52,8 @@ public class RetryConsumer {
     private static final String CONSUMER_GROUP = "retry-test-group";
 
     @KafkaListener(
-        topics = "${kafka.topic.retry:market.retry.test}",
-        groupId = "${kafka.consumer.group.retry:retry-test-group}",
+        topics = "${spring.kafka.topic.retry:market.retry}",
+        groupId = "${spring.kafka.consumer.group.retry:retry-group}",
         containerFactory = "retryKafkaListenerContainerFactory"
     )
     public void consumeRetryMessage(

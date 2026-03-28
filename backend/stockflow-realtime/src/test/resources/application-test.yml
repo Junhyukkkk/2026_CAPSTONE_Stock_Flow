@@ -13,8 +13,10 @@ spring:
       group:
         realtime: test-realtime-group
         storage: test-storage-group
+        retry: test-retry-group
     topic:
       normalized: market.normalized
+      retry: market.retry
       dlq: market.dlq
 
   data:

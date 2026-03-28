@@ -14,10 +14,10 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * 재시도 가능한 메시지 처리기 (test 프로필용)
+ * 재시도 가능한 메시지 처리기 (비동기 방식)
  *
+ * RETRY_MODE=async 일 때 활성화
  * 비동기 Retry 토픽 방식으로 리밸런싱 방지
- * Consumer에서 사용하는 재시도 로직을 캡슐화
  */
 @Slf4j
 @Component

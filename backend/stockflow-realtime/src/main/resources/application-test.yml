@@ -15,6 +15,7 @@ spring:
       group:
         realtime: ${KAFKA_CONSUMER_GROUP_REALTIME:realtime-test-group}
         storage: ${KAFKA_CONSUMER_GROUP_STORAGE:storage-test-group}
+        retry: ${KAFKA_CONSUMER_GROUP_RETRY:retry-test-group}
       # 배치 처리 설정
       max-poll-records: ${KAFKA_CONSUMER_MAX_POLL_RECORDS:100}
       fetch-min-size: ${KAFKA_CONSUMER_FETCH_MIN_SIZE:1}
@@ -25,6 +26,7 @@ spring:
         max.poll.interval.ms: ${KAFKA_MAX_POLL_INTERVAL_MS:300000}
     topic:
       normalized: ${KAFKA_TOPIC_NORMALIZED:market.normalized.test}
+      retry: ${KAFKA_TOPIC_RETRY:market.retry.test}
       dlq: ${KAFKA_TOPIC_DLQ:market.dlq.test}
     # 배치 처리 설정
     batch:
@@ -90,18 +92,6 @@ logging:
     com.stockflow: DEBUG
     org.springframework.kafka: INFO
     org.springframework.data.redis: INFO
-
-# Consumer 코드가 참조하는 property path (spring.kafka와 별도)
-kafka:
-  topic:
-    normalized: market.normalized.test
-    dlq: market.dlq.test
-    retry: market.retry.test
-  consumer:
-    group:
-      realtime: realtime-test-group
-      storage: storage-test-group
-      retry: retry-test-group
 
 # Retry 토픽 방식 설정
 retry:

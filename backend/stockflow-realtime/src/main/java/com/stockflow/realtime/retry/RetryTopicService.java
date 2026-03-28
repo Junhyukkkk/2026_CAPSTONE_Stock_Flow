@@ -29,10 +29,10 @@ public class RetryTopicService {
 
     private final KafkaTemplate<String, NormalizedTradeDTO> kafkaTemplate;
 
-    @Value("${kafka.topic.retry:market.retry.test}")
+    @Value("${spring.kafka.topic.retry:market.retry}")
     private String retryTopic;
 
-    @Value("${kafka.topic.normalized:market.normalized}")
+    @Value("${spring.kafka.topic.normalized:market.normalized}")
     private String originalTopic;
 
     // 헤더 키

@@ -47,8 +47,8 @@ public class RealtimeConsumer {
      * @param offset 오프셋
      */
     @KafkaListener(
-        topics = "${kafka.topic.normalized:market.normalized}",
-        groupId = "${kafka.consumer.group.realtime:realtime-group}",
+        topics = "${spring.kafka.topic.normalized:market.normalized}",
+        groupId = "${spring.kafka.consumer.group.realtime:realtime-group}",
         containerFactory = "kafkaListenerContainerFactory"
     )
     public void consumeRealtimeTrade(

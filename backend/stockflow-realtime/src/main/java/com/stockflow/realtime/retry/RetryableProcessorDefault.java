@@ -16,9 +16,10 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * 재시도 가능한 메시지 처리기 (운영용 - 동기 방식)
+ * 재시도 가능한 메시지 처리기 (동기 방식)
  *
- * test 프로필이 아닐 때 활성화
+ * RETRY_MODE=sync 일 때 활성화 (기본값)
+ * 동기 재시도로 리밸런싱 발생 가능
  */
 @Slf4j
 @Component
