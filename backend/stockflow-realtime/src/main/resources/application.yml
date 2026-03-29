@@ -57,6 +57,8 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    # TimescaleDB create_hypertable / 연속 집계 등이 Flyway 기본(마이그레이션당 TX)과 충돌할 수 있음
+    execute-in-transaction: false
 
   jpa:
     hibernate:
