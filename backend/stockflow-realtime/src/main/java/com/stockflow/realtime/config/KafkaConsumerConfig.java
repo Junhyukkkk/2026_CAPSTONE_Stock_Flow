@@ -38,6 +38,12 @@ public class KafkaConsumerConfig {
     @Value("${spring.kafka.consumer.fetch-max-wait:500}")
     private int fetchMaxWait;
 
+    @Value("${spring.kafka.consumer.concurrency:4}")
+    private int concurrency;
+
+    @Value("${spring.kafka.consumer.properties.max.poll.interval.ms:300000}")
+    private int maxPollIntervalMs;
+
     /**
      * Consumer Factory 설정
      * 
@@ -69,6 +75,9 @@ public class KafkaConsumerConfig {
         // 세션 타임아웃 설정
         props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 30000);
         props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, 10000);
+
+        // poll 간격 설정 (리밸런싱 방지)
+        props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, maxPollIntervalMs);
         
         // 메모리 최적화
         props.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, 1048576); // 1MB
@@ -102,8 +111,8 @@ public class KafkaConsumerConfig {
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
         
         // 동시성 설정 (파티션 수와 동일하게)
-        factory.setConcurrency(4);
-        
+        factory.setConcurrency(concurrency);
+
         return factory;
     }
 
@@ -127,8 +136,8 @@ public class KafkaConsumerConfig {
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
         
         // 동시성 설정
-        factory.setConcurrency(4);
-        
+        factory.setConcurrency(concurrency);
+
         return factory;
     }
 }

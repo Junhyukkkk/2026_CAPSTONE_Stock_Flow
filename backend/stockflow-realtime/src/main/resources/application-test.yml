@@ -13,9 +13,9 @@ spring:
       auto-offset-reset: latest
       enable-auto-commit: false
       group:
-        realtime: ${KAFKA_CONSUMER_GROUP_REALTIME:realtime-group}
-        storage: ${KAFKA_CONSUMER_GROUP_STORAGE:storage-group}
-        retry: ${KAFKA_CONSUMER_GROUP_RETRY:retry-group}
+        realtime: ${KAFKA_CONSUMER_GROUP_REALTIME:realtime-test-group}
+        storage: ${KAFKA_CONSUMER_GROUP_STORAGE:storage-test-group}
+        retry: ${KAFKA_CONSUMER_GROUP_RETRY:retry-test-group}
       # 배치 처리 설정
       max-poll-records: ${KAFKA_CONSUMER_MAX_POLL_RECORDS:100}
       fetch-min-size: ${KAFKA_CONSUMER_FETCH_MIN_SIZE:1}
@@ -25,9 +25,9 @@ spring:
       properties:
         max.poll.interval.ms: ${KAFKA_MAX_POLL_INTERVAL_MS:300000}
     topic:
-      normalized: ${KAFKA_TOPIC_NORMALIZED:market.normalized}
-      retry: ${KAFKA_TOPIC_RETRY:market.retry}
-      dlq: ${KAFKA_TOPIC_DLQ:market.dlq}
+      normalized: ${KAFKA_TOPIC_NORMALIZED:market.normalized.test}
+      retry: ${KAFKA_TOPIC_RETRY:market.retry.test}
+      dlq: ${KAFKA_TOPIC_DLQ:market.dlq.test}
     # 배치 처리 설정
     batch:
       size: ${KAFKA_BATCH_SIZE:100}
@@ -97,12 +97,13 @@ logging:
     org.springframework.kafka: INFO
     org.springframework.data.redis: INFO
 
-# Retry Policy 설정 (RetryPolicyConfig에서 참조)
+# Retry 토픽 방식 설정
 retry:
   mode: ${RETRY_MODE:sync}
+  max-retries: ${RETRY_MAX_RETRIES:3}
+  delay-ms: ${RETRY_DELAY_MS:5000}
   initial-delay-ms: ${RETRY_INITIAL_DELAY_MS:1000}
   multiplier: ${RETRY_MULTIPLIER:2.0}
-  max-retries: ${RETRY_MAX_RETRIES:3}
   max-delay-ms: ${RETRY_MAX_DELAY_MS:60000}
   use-jitter: ${RETRY_USE_JITTER:true}
   jitter-ratio: ${RETRY_JITTER_RATIO:0.2}

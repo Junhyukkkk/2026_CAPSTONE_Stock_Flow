@@ -10,6 +10,8 @@ dependencies {
 
     // Spring Context (for @Component, @Service)
     implementation 'org.springframework:spring-context'
+    // ErrorClassifier: DataAccessException, TransactionException
+    implementation 'org.springframework:spring-tx'
 
     // Test dependencies
     testImplementation 'org.springframework.boot:spring-boot-starter-test'

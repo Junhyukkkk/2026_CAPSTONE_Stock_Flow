@@ -1,5 +1,4 @@
 rootProject.name = 'stockflow'
 
 include 'stockflow-core'
-include 'stockflow-api'
 include 'stockflow-realtime'

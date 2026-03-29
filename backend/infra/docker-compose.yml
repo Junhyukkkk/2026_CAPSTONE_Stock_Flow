@@ -73,16 +73,33 @@ services:
     ports:
       - "8081:8081"
     environment:
+      # Spring Profile
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-}
+      # Kafka
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_CONSUMER_GROUP_REALTIME=realtime-group
+      - KAFKA_CONSUMER_GROUP_STORAGE=storage-group
+      - KAFKA_MAX_POLL_INTERVAL_MS=${KAFKA_MAX_POLL_INTERVAL_MS:-300000}
+      - KAFKA_CONSUMER_CONCURRENCY=${KAFKA_CONSUMER_CONCURRENCY:-12}
+      - KAFKA_CONSUMER_MAX_POLL_RECORDS=${KAFKA_CONSUMER_MAX_POLL_RECORDS:-100}
+      # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      # Database
       - DB_HOST=timescaledb
       - DB_PORT=5432
       - DB_NAME=stockflow
       - DB_USERNAME=postgres
       - DB_PASSWORD=postgres
-      - KAFKA_CONSUMER_GROUP_REALTIME=realtime-group
-      - KAFKA_CONSUMER_GROUP_STORAGE=storage-group
+      # Retry Policy
+      - RETRY_MODE=${RETRY_MODE:-sync}
+      - RETRY_MAX_RETRIES=${RETRY_MAX_RETRIES:-3}
+      - RETRY_DELAY_MS=${RETRY_DELAY_MS:-5000}
+      - RETRY_INITIAL_DELAY_MS=${RETRY_INITIAL_DELAY_MS:-1000}
+      - RETRY_MULTIPLIER=${RETRY_MULTIPLIER:-2.0}
+      - RETRY_MAX_DELAY_MS=${RETRY_MAX_DELAY_MS:-60000}
+      - RETRY_USE_JITTER=${RETRY_USE_JITTER:-true}
+      - RETRY_JITTER_RATIO=${RETRY_JITTER_RATIO:-0.2}
     depends_on:
       - kafka
       - redis
