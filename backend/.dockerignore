@@ -1,0 +1,7 @@
+# Docker 빌드 컨텍스트(backend/)에서 제외할 것만 명시. 소스 디렉터리는 제외하지 말 것.
+**/build/
+**/.gradle/
+**/.git/
+.idea
+*.iml
+.DS_Store

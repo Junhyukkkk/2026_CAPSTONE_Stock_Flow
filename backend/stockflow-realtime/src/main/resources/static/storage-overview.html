@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockFlow — Timescale 저장 미리보기</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: "Segoe UI", system-ui, sans-serif;
+            background: linear-gradient(160deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+            color: #e2e8f0;
+            min-height: 100vh;
+            padding: 24px;
+        }
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #38bdf8;
+            margin-bottom: 8px;
+        }
+        .sub {
+            color: #94a3b8;
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+            max-width: 720px;
+            line-height: 1.5;
+        }
+        .banner {
+            background: rgba(56, 189, 248, 0.08);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 20px;
+            max-width: 900px;
+            font-size: 0.88rem;
+            line-height: 1.55;
+            color: #cbd5e1;
+        }
+        .banner strong { color: #7dd3fc; }
+        .stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .stat {
+            background: #1e293b;
+            border-radius: 10px;
+            padding: 12px 16px;
+            border: 1px solid #334155;
+            min-width: 160px;
+        }
+        .stat label {
+            display: block;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+        .stat span { font-size: 1.15rem; font-weight: 600; color: #f1f5f9; }
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            background: #0ea5e9;
+            color: #0f172a;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        button:hover { background: #38bdf8; }
+     
+        label.chk { font-size: 0.85rem; color: #94a3b8; display: flex; align-items: center; gap: 6px; }
+        section { margin-bottom: 28px; max-width: 1100px; }
+        section h2 {
+            font-size: 1rem;
+            color: #94a3b8;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+        .table-wrap {
+            overflow: auto;
+            border-radius: 10px;
+            border: 1px solid #334155;
+            background: #0f172a;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+        }
+        th, td {
+            text-align: left;
+            padding: 8px 10px;
+            border-bottom: 1px solid #1e293b;
+        }
+        th {
+            background: #1e293b;
+            color: #94a3b8;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        tr:hover td { background: rgba(56, 189, 248, 0.06); }
+        .err {
+            color: #f87171;
+            font-size: 0.85rem;
+            margin-top: 8px;
+        }
+        .muted { color: #64748b; font-size: 0.8rem; margin-top: 6px; }
+    </style>
+</head>
+<body>
+    <h1>Timescale 저장 미리보기</h1>
+    <p class="sub">
+        Kafka <code>market.normalized</code> → Storage consumer → PostgreSQL/Timescale
+        <code>market_ticks</code> 하이퍼테이블과 1분 연속 집계(<code>market_ticks_1m</code>)를
+        발표·데모 때 바로 보여주기 위한 읽기 전용 화면입니다.
+    </p>
+
+    <div class="banner">
+        <strong>설명 팁:</strong>
+        틱 행 수는 <code>pg_stat</code>/<code>pg_class</code> 기준 <strong>근사치</strong>입니다(전체 COUNT 대신 빠르게 표시).
+        아래 표는 최신 순 일부 샘플만 보여 줍니다. 정확한 분석·감사는 SQL 클라이언트나
+        <code>infra/sql/health_market_ticks.sql</code>를 쓰면 됩니다.
+    </div>
+
+    <div class="stats">
+        <div class="stat">
+            <label>근사 틱 행 수 (market_ticks)</label>
+            <span id="approxRows">—</span>
+        </div>
+        <div class="stat">
+            <label>1분 연속 집계</label>
+            <span id="caStatus">—</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        
+        <button type="button" id="refreshBtn">지금 새로고침</button>
+        <label class="chk">
+            <input type="checkbox" id="autoRefresh" checked>
+            10초마다 자동 갱신
+        </label>
+    </div>
+    <p id="error" class="err" hidden></p>
+
+    <section>
+        <h2>최근 원시 틱 (market_ticks)</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ts</th>
+                        <th>symbol</th>
+                        <th>source</th>
+                        <th>price</th>
+                        <th>volume</th>
+                        <th>trade_id</th>
+                        <th>ingested_at</th>
+                    </tr>
+                </thead>
+                <tbody id="ticksBody"></tbody>
+            </table>
+        </div>
+        <p class="muted" id="ticksEmpty" hidden>행이 없거나 DB에 연결할 수 없습니다. 앱과 Timescale이 떠 있는지 확인하세요.</p>
+    </section>
+
+    <section>
+        <h2>최근 1분 봉 샘플 (market_ticks_1m)</h2>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>bucket</th>
+                        <th>symbol</th>
+                        <th>source</th>
+                        <th>open</th>
+                        <th>high</th>
+                        <th>low</th>
+                        <th>close</th>
+                        <th>volume</th>
+                    </tr>
+                </thead>
+                <tbody id="barsBody"></tbody>
+            </table>
+        </div>
+        <p class="muted" id="barsEmpty" hidden>연속 집계가 없거나 아직 데이터가 없습니다.</p>
+    </section>
+
+    <script>
+        const base = '';
+        const ticksBody = document.getElementById('ticksBody');
+        const barsBody = document.getElementById('barsBody');
+        const approxRows = document.getElementById('approxRows');
+        const caStatus = document.getElementById('caStatus');
+        const errorEl = document.getElementById('error');
+        const ticksEmpty = document.getElementById('ticksEmpty');
+        const barsEmpty = document.getElementById('barsEmpty');
+        let timer = null;
+
+        function fmtTs(iso) {
+            if (!iso) return '—';
+            try {
+                const d = new Date(iso);
+                return d.toLocaleString(undefined, { hour12: false });
+            } catch { return iso; }
+        }
+
+        function esc(s) {
+            if (s == null) return '';
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+        }
+
+        async function load() {
+            errorEl.hidden = true;
+            try {
+                const r = await fetch(base + '/api/storage/overview?ticksLimit=30');
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const data = await r.json();
+
+                approxRows.textContent = data.approximateTickRows != null
+                    ? Number(data.approximateTickRows).toLocaleString()
+                    : '—';
+                caStatus.textContent = data.oneMinuteAggregateAvailable ? '사용 중' : '없음 / 미적용';
+
+                const ticks = data.recentTicks || [];
+                ticksEmpty.hidden = ticks.length > 0;
+                ticksBody.innerHTML = ticks.map(t => `
+                    <tr>
+                        <td>${esc(fmtTs(t.ts))}</td>
+                        <td>${esc(t.symbol)}</td>
+                        <td>${esc(t.source)}</td>
+                        <td>${esc(t.price)}</td>
+                        <td>${esc(t.volume)}</td>
+                        <td>${esc(t.tradeId)}</td>
+                        <td>${esc(fmtTs(t.ingestedAt))}</td>
+                    </tr>
+                `).join('');
+
+                const bars = data.recentOneMinuteBars || [];
+                barsEmpty.hidden = bars.length > 0;
+                barsBody.innerHTML = bars.map(b => `
+                    <tr>
+                        <td>${esc(fmtTs(b.bucket))}</td>
+                        <td>${esc(b.symbol)}</td>
+                        <td>${esc(b.source)}</td>
+                        <td>${esc(b.open)}</td>
+                        <td>${esc(b.high)}</td>
+                        <td>${esc(b.low)}</td>
+                        <td>${esc(b.close)}</td>
+                        <td>${esc(b.volume)}</td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                errorEl.textContent = '불러오기 실패: ' + e.message + ' (앱 주소가 맞는지, CORS가 아닌 동일 출처에서 여는지 확인)';
+                errorEl.hidden = false;
+            }
+        }
+
+        document.getElementById('refreshBtn').addEventListener('click', load);
+
+        function schedule() {
+            if (timer) clearInterval(timer);
+            timer = null;
+            if (document.getElementById('autoRefresh').checked) {
+                timer = setInterval(load, 10000);
+            }
+        }
+
+        document.getElementById('autoRefresh').addEventListener('change', schedule);
+
+        load();
+        schedule();
+    </script>
+</body>
+</html>
