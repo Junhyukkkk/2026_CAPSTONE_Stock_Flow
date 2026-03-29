@@ -4,6 +4,7 @@ import com.stockflow.core.util.BatchProcessor;
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.core.metrics.PerformanceMetrics;
 import com.stockflow.realtime.retry.RetryableProcessorInterface;
+import com.stockflow.realtime.storage.MarketTickBulkWriter;
 import com.stockflow.realtime.transaction.RealtimeTransactionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,12 +36,10 @@ public class StorageConsumer {
     private final BatchProcessor batchProcessor;
     private final PerformanceMetrics performanceMetrics;
     private final RealtimeTransactionManager transactionManager;
+    private final MarketTickBulkWriter marketTickBulkWriter;
 
     @Value("${spring.kafka.consumer.group.storage:storage-group}")
     private String consumerGroup;
-
-    // TODO: DB 서비스 주입 (다음 단계에서 구현)
-    // private final MarketTickService marketTickService;
 
     /**
      * 저장용 거래 데이터 수신 및 배치 처리
@@ -103,9 +102,7 @@ public class StorageConsumer {
      * @param trades 처리할 거래 데이터 리스트
      */
     private void processBatch(List<NormalizedTradeDTO> trades) {
-        // TODO: 배치로 DB에 저장 (다음 단계에서 구현)
-        // marketTickService.saveBatch(trades);
-        
+        marketTickBulkWriter.insertBatch(trades);
         log.trace("Processing batch: size={}", trades.size());
     }
 }

@@ -11,7 +11,6 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -20,11 +19,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-/**
- * IdempotencyService 테스트
- */
 @ExtendWith(MockitoExtension.class)
 class IdempotencyServiceTest {
+
+    private static final String CH = IdempotencyChannels.STORAGE;
 
     @Mock
     private RedisTemplate<String, String> redisTemplate;
@@ -40,91 +38,80 @@ class IdempotencyServiceTest {
     @BeforeEach
     void setUp() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-        
+
+        long now = System.currentTimeMillis();
         testTrade = NormalizedTradeDTO.builder()
-            .symbol("BTCUSDT")
-            .price(new BigDecimal("50000.00"))
-            .quantity(new BigDecimal("0.1"))
-            .timestamp(Instant.now())
-            .source("binance")
-            .tradeId("test-trade-id-1")
-            .build();
+                .symbol("BTCUSDT")
+                .price(new BigDecimal("50000.00"))
+                .volume(new BigDecimal("0.1"))
+                .timestamp(now)
+                .receivedAt(now)
+                .source("BINANCE")
+                .tradeId("test-trade-id-1")
+                .exchange("BINANCE")
+                .marketType("CRYPTO")
+                .build();
     }
 
     @Test
     void testIsAlreadyProcessed_True() {
-        // Given
         when(redisTemplate.hasKey(anyString())).thenReturn(true);
 
-        // When
-        boolean result = idempotencyService.isAlreadyProcessed(testTrade);
+        boolean result = idempotencyService.isAlreadyProcessed(CH, testTrade);
 
-        // Then
         assertTrue(result);
-        verify(redisTemplate, times(1)).hasKey(anyString());
+        verify(redisTemplate, times(1)).hasKey(contains("processed:storage:BINANCE:test-trade-id-1"));
     }
 
     @Test
     void testIsAlreadyProcessed_False() {
-        // Given
         when(redisTemplate.hasKey(anyString())).thenReturn(false);
 
-        // When
-        boolean result = idempotencyService.isAlreadyProcessed(testTrade);
+        boolean result = idempotencyService.isAlreadyProcessed(CH, testTrade);
 
-        // Then
         assertFalse(result);
-        verify(redisTemplate, times(1)).hasKey(anyString());
     }
 
     @Test
     void testMarkAsProcessed() {
-        // Given
         long ttl = 86400L;
 
-        // When
-        idempotencyService.markAsProcessed(testTrade, ttl);
+        idempotencyService.markAsProcessed(CH, testTrade, ttl);
 
-        // Then
         verify(valueOperations, times(1)).set(
-            anyString(),
-            eq("1"),
-            eq(ttl),
-            eq(TimeUnit.SECONDS)
+                contains("processed:storage:BINANCE"),
+                eq("1"),
+                eq(ttl),
+                eq(TimeUnit.SECONDS)
         );
     }
 
     @Test
     void testMarkAsProcessed_DefaultTTL() {
-        // When
-        idempotencyService.markAsProcessed(testTrade);
+        idempotencyService.markAsProcessed(CH, testTrade);
 
-        // Then
         verify(valueOperations, times(1)).set(
-            anyString(),
-            eq("1"),
-            eq(86400L),
-            eq(TimeUnit.SECONDS)
+                anyString(),
+                eq("1"),
+                eq(86400L),
+                eq(TimeUnit.SECONDS)
         );
     }
 
     @Test
     void testMarkBatchAsProcessed() {
-        // Given
         List<NormalizedTradeDTO> trades = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
             trades.add(testTrade);
         }
 
-        // When
-        idempotencyService.markBatchAsProcessed(trades);
+        idempotencyService.markBatchAsProcessed(CH, trades);
 
-        // Then
         verify(valueOperations, times(5)).set(
-            anyString(),
-            eq("1"),
-            eq(86400L),
-            eq(TimeUnit.SECONDS)
+                anyString(),
+                eq("1"),
+                eq(86400L),
+                eq(TimeUnit.SECONDS)
         );
     }
 }

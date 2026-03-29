@@ -3,6 +3,9 @@ package com.stockflow.core.error;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.TransactionException;
+
 import java.net.ConnectException;
 import java.sql.SQLException;
 import java.util.concurrent.TimeoutException;
@@ -28,35 +31,64 @@ public class ErrorClassifier {
             return ErrorType.UNKNOWN_ERROR;
         }
 
-        // 타임아웃 오류
+        Throwable root = unwrapSpringDataCause(exception);
+        ErrorType direct = classifyLeaf(root);
+        if (direct != ErrorType.PROCESSING_ERROR) {
+            return direct;
+        }
+
+        // 원인 체인에서 SQL/연결/검증 재탐색
+        Throwable t = exception;
+        for (int i = 0; i < 12 && t != null; i++) {
+            ErrorType leaf = classifyLeaf(t);
+            if (leaf != ErrorType.PROCESSING_ERROR) {
+                return leaf;
+            }
+            t = t.getCause();
+        }
+
+        return ErrorType.PROCESSING_ERROR;
+    }
+
+    private Throwable unwrapSpringDataCause(Throwable exception) {
+        Throwable t = exception;
+        for (int i = 0; i < 12 && t != null; i++) {
+            if (t instanceof DataAccessException && t.getCause() != null) {
+                t = t.getCause();
+                continue;
+            }
+            if (t instanceof TransactionException && t.getCause() != null) {
+                t = t.getCause();
+                continue;
+            }
+            break;
+        }
+        return t != null ? t : exception;
+    }
+
+    private ErrorType classifyLeaf(Throwable exception) {
         if (exception instanceof TimeoutException) {
             return ErrorType.TIMEOUT_ERROR;
         }
 
-        // 연결 오류 (재시도 가능)
         if (exception instanceof ConnectException) {
             return ErrorType.STORAGE_CONNECTION_ERROR;
         }
 
-        // SQL 오류
         if (exception instanceof SQLException) {
             SQLException sqlException = (SQLException) exception;
-            // 연결 관련 SQL 오류는 재시도 가능
             if (isConnectionError(sqlException)) {
                 return ErrorType.STORAGE_CONNECTION_ERROR;
             }
             return ErrorType.STORAGE_ERROR;
         }
 
-        // IllegalArgumentException, NullPointerException 등
-        // 데이터 검증/처리 오류
         if (exception instanceof IllegalArgumentException ||
             exception instanceof NullPointerException ||
             exception instanceof ClassCastException) {
             return ErrorType.VALIDATION_ERROR;
         }
 
-        // Redis 연결 오류 (Lettuce 예외)
         String exceptionMessage = exception.getMessage();
         if (exceptionMessage != null) {
             if (exceptionMessage.contains("Connection refused") ||
@@ -65,7 +97,14 @@ public class ErrorClassifier {
             }
         }
 
-        // 기본값: 처리 오류
+        if (exception instanceof DataAccessException) {
+            return ErrorType.STORAGE_ERROR;
+        }
+
+        if (exception instanceof TransactionException) {
+            return ErrorType.STORAGE_ERROR;
+        }
+
         return ErrorType.PROCESSING_ERROR;
     }
 
