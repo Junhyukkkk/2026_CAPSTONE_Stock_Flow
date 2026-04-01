@@ -15,6 +15,11 @@ import org.springframework.kafka.support.serializer.JsonSerializer;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * 테스트용 Kafka Producer 설정
+ *
+ * test 프로파일에서만 활성화
+ */
 @Configuration
 @Profile("test")
 public class TestKafkaProducerConfig {
