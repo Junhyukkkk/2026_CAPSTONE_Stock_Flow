@@ -44,6 +44,15 @@ public class KafkaConsumerConfig {
     @Value("${spring.kafka.consumer.properties.max.poll.interval.ms:300000}")
     private int maxPollIntervalMs;
 
+    @Value("${spring.kafka.consumer.session-timeout-ms:30000}")
+    private int sessionTimeoutMs;
+
+    @Value("${spring.kafka.consumer.heartbeat-interval-ms:10000}")
+    private int heartbeatIntervalMs;
+
+    @Value("${spring.kafka.consumer.max-partition-fetch-bytes:1048576}")
+    private int maxPartitionFetchBytes;
+
     /**
      * Consumer Factory 설정
      * 
@@ -73,14 +82,14 @@ public class KafkaConsumerConfig {
         props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, fetchMaxWait);
         
         // 세션 타임아웃 설정
-        props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 30000);
-        props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, 10000);
+        props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, sessionTimeoutMs);
+        props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, heartbeatIntervalMs);
 
         // poll 간격 설정 (리밸런싱 방지)
         props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, maxPollIntervalMs);
-        
+
         // 메모리 최적화
-        props.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, 1048576); // 1MB
+        props.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, maxPartitionFetchBytes);
         
         // JSON 역직렬화 설정
         JsonDeserializer<NormalizedTradeDTO> deserializer = new JsonDeserializer<>(NormalizedTradeDTO.class);

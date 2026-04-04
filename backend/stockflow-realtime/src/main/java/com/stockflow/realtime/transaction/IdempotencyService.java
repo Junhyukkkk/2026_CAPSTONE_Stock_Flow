@@ -17,6 +17,8 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class IdempotencyService {
 
+    private static final long DEFAULT_TTL_SECONDS = 86400; // 24시간
+
     private final RedisTemplate<String, String> redisTemplate;
 
     private String generateKey(String channel, NormalizedTradeDTO trade) {
@@ -35,7 +37,7 @@ public class IdempotencyService {
     }
 
     public void markAsProcessed(String channel, NormalizedTradeDTO trade) {
-        markAsProcessed(channel, trade, 86400);
+        markAsProcessed(channel, trade, DEFAULT_TTL_SECONDS);
     }
 
     public void markBatchAsProcessed(String channel, List<NormalizedTradeDTO> trades) {
