@@ -4,7 +4,6 @@ import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.core.metrics.PerformanceMetrics;
 import com.stockflow.realtime.retry.RetryableProcessorInterface;
 import com.stockflow.realtime.service.RedisPriceService;
-import com.stockflow.realtime.transaction.RealtimeTransactionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,7 +31,6 @@ public class RealtimeConsumer {
 
     private final RetryableProcessorInterface retryableProcessor;
     private final PerformanceMetrics performanceMetrics;
-    private final RealtimeTransactionManager transactionManager;
     private final RedisPriceService redisPriceService;
 
     @Value("${spring.kafka.consumer.group.realtime:realtime-group}")
@@ -62,13 +60,10 @@ public class RealtimeConsumer {
 
         long startTime = System.currentTimeMillis();
 
-        // 트랜잭션 및 재시도 로직 포함하여 처리
+        // 재시도 로직 포함하여 처리 (멱등성 체크 제거 - Redis SET은 자연적 멱등성)
         boolean success = retryableProcessor.processWithRetry(
             trade,
-            (t) -> {
-                // 트랜잭션으로 처리 (Idempotency 포함)
-                transactionManager.processWithTransaction(t, this::processTrade);
-            },
+            this::processTrade,
             consumerGroup,
             partition,
             offset
