@@ -1,192 +1,189 @@
 {
-  "dashboard": {
-    "uid": "stockflow-jvm",
-    "title": "StockFlow - JVM",
-    "tags": ["stockflow", "jvm"],
-    "timezone": "Asia/Seoul",
-    "refresh": "10s",
-    "time": { "from": "now-1h", "to": "now" },
-    "panels": [
-      {
-        "title": "Heap 사용률 (%)",
-        "type": "gauge",
-        "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "jvm_memory_used_bytes{area=\"heap\"} / jvm_memory_max_bytes{area=\"heap\"} * 100", "legendFormat": "Heap %" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "percent", "min": 0, "max": 100,
-            "thresholds": {
-              "steps": [
-                { "color": "green", "value": null },
-                { "color": "yellow", "value": 70 },
-                { "color": "red", "value": 85 }
-              ]
-            }
-          }
-        }
-      },
-      {
-        "title": "Live Threads",
-        "type": "stat",
-        "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "jvm_threads_live_threads", "legendFormat": "Live" }
-        ],
-        "fieldConfig": { "defaults": { "unit": "short" } },
-        "options": { "colorMode": "background", "graphMode": "area" }
-      },
-      {
-        "title": "Process CPU (%)",
-        "type": "gauge",
-        "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "process_cpu_usage * 100", "legendFormat": "CPU %" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "percent", "min": 0, "max": 100,
-            "thresholds": {
-              "steps": [
-                { "color": "green", "value": null },
-                { "color": "yellow", "value": 60 },
-                { "color": "red", "value": 85 }
-              ]
-            }
-          }
-        }
-      },
-      {
-        "title": "Uptime",
-        "type": "stat",
-        "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "process_uptime_seconds", "legendFormat": "Uptime" }
-        ],
-        "fieldConfig": { "defaults": { "unit": "s" } }
-      },
-      {
-        "title": "Heap Memory (Used / Committed / Max)",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "jvm_memory_used_bytes{area=\"heap\"} / 1024 / 1024", "legendFormat": "Used (MB)" },
-          { "expr": "jvm_memory_committed_bytes{area=\"heap\"} / 1024 / 1024", "legendFormat": "Committed (MB)" },
-          { "expr": "jvm_memory_max_bytes{area=\"heap\"} / 1024 / 1024", "legendFormat": "Max (MB)" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "decmbytes",
-            "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
-          }
-        }
-      },
-      {
-        "title": "Non-Heap Memory",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "jvm_memory_used_bytes{area=\"nonheap\"} / 1024 / 1024", "legendFormat": "Used (MB)" },
-          { "expr": "jvm_memory_committed_bytes{area=\"nonheap\"} / 1024 / 1024", "legendFormat": "Committed (MB)" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "decmbytes",
-            "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
-          }
-        }
-      },
-      {
-        "title": "GC Pause Time (1분 합계)",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "increase(jvm_gc_pause_seconds_sum[1m])", "legendFormat": "GC Pause Sum (1m)" },
-          { "expr": "increase(jvm_gc_pause_seconds_count[1m])", "legendFormat": "GC Count (1m)" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "s",
-            "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "bars" }
-          }
-        }
-      },
-      {
-        "title": "GC Memory (Allocated / Promoted)",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "rate(jvm_gc_memory_allocated_bytes_total[5m]) / 1024 / 1024", "legendFormat": "Allocated (MB/s)" },
-          { "expr": "rate(jvm_gc_memory_promoted_bytes_total[5m]) / 1024 / 1024", "legendFormat": "Promoted (MB/s)" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "MBs",
-            "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
-          }
-        }
-      },
-      {
-        "title": "Thread Count (Live / Peak / Daemon)",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "jvm_threads_live_threads", "legendFormat": "Live" },
-          { "expr": "jvm_threads_peak_threads", "legendFormat": "Peak" },
-          { "expr": "jvm_threads_daemon_threads", "legendFormat": "Daemon" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
-          }
-        }
-      },
-      {
-        "title": "CPU Usage (Process vs System)",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "process_cpu_usage * 100", "legendFormat": "Process CPU %" },
-          { "expr": "system_cpu_usage * 100", "legendFormat": "System CPU %" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "percent", "min": 0, "max": 100,
-            "custom": { "lineWidth": 2, "fillOpacity": 20, "drawStyle": "line" }
-          }
-        }
-      },
-      {
-        "title": "Loaded Classes / Buffer Memory",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 29 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "jvm_classes_loaded_classes", "legendFormat": "Loaded Classes" },
-          { "expr": "jvm_buffer_memory_used_bytes / 1024 / 1024", "legendFormat": "Buffer Memory (MB)" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
+  "uid": "stockflow-jvm",
+  "title": "StockFlow - JVM",
+  "tags": ["stockflow", "jvm"],
+  "timezone": "Asia/Seoul",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "Heap 사용률 (%)",
+      "type": "gauge",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "jvm_memory_used_bytes{area=\"heap\"} / jvm_memory_max_bytes{area=\"heap\"} * 100", "legendFormat": "Heap %" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 85 }
+            ]
           }
         }
       }
-    ],
-    "schemaVersion": 39,
-    "version": 1
-  },
-  "overwrite": true
+    },
+    {
+      "title": "Live Threads",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "jvm_threads_live_threads", "legendFormat": "Live" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "options": { "colorMode": "background", "graphMode": "area" }
+    },
+    {
+      "title": "Process CPU (%)",
+      "type": "gauge",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "process_cpu_usage * 100", "legendFormat": "CPU %" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 85 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Uptime",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "process_uptime_seconds", "legendFormat": "Uptime" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Heap Memory (Used / Committed / Max)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "jvm_memory_used_bytes{area=\"heap\"} / 1024 / 1024", "legendFormat": "Used (MB)" },
+        { "expr": "jvm_memory_committed_bytes{area=\"heap\"} / 1024 / 1024", "legendFormat": "Committed (MB)" },
+        { "expr": "jvm_memory_max_bytes{area=\"heap\"} / 1024 / 1024", "legendFormat": "Max (MB)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decmbytes",
+          "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "Non-Heap Memory",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "jvm_memory_used_bytes{area=\"nonheap\"} / 1024 / 1024", "legendFormat": "Used (MB)" },
+        { "expr": "jvm_memory_committed_bytes{area=\"nonheap\"} / 1024 / 1024", "legendFormat": "Committed (MB)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decmbytes",
+          "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "GC Pause Time (1분 합계)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "increase(jvm_gc_pause_seconds_sum[1m])", "legendFormat": "GC Pause Sum (1m)" },
+        { "expr": "increase(jvm_gc_pause_seconds_count[1m])", "legendFormat": "GC Count (1m)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "bars" }
+        }
+      }
+    },
+    {
+      "title": "GC Memory (Allocated / Promoted)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(jvm_gc_memory_allocated_bytes_total[5m]) / 1024 / 1024", "legendFormat": "Allocated (MB/s)" },
+        { "expr": "rate(jvm_gc_memory_promoted_bytes_total[5m]) / 1024 / 1024", "legendFormat": "Promoted (MB/s)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "MBs",
+          "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "Thread Count (Live / Peak / Daemon)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "jvm_threads_live_threads", "legendFormat": "Live" },
+        { "expr": "jvm_threads_peak_threads", "legendFormat": "Peak" },
+        { "expr": "jvm_threads_daemon_threads", "legendFormat": "Daemon" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "CPU Usage (Process vs System)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "process_cpu_usage * 100", "legendFormat": "Process CPU %" },
+        { "expr": "system_cpu_usage * 100", "legendFormat": "System CPU %" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "custom": { "lineWidth": 2, "fillOpacity": 20, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "Loaded Classes / Buffer Memory",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 29 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "jvm_classes_loaded_classes", "legendFormat": "Loaded Classes" },
+        { "expr": "jvm_buffer_memory_used_bytes / 1024 / 1024", "legendFormat": "Buffer Memory (MB)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
 }

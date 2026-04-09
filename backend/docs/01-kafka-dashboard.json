@@ -1,177 +1,174 @@
 {
-  "dashboard": {
-    "uid": "stockflow-kafka",
-    "title": "StockFlow - Kafka",
-    "tags": ["stockflow", "kafka"],
-    "timezone": "Asia/Seoul",
-    "refresh": "10s",
-    "time": { "from": "now-1h", "to": "now" },
-    "panels": [
-      {
-        "title": "Consumer Lag (Total)",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "sum(kafka_consumer_records_lag)", "legendFormat": "Total Lag" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "thresholds": {
-              "steps": [
-                { "color": "green", "value": null },
-                { "color": "yellow", "value": 1000 },
-                { "color": "red", "value": 10000 }
-              ]
-            }
-          }
-        },
-        "options": { "colorMode": "background", "graphMode": "area" }
-      },
-      {
-        "title": "초당 소비량 (records/s)",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "rate(kafka_consumer_records_consumed_total[5m])", "legendFormat": "Throughput" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "ops",
-            "thresholds": {
-              "steps": [
-                { "color": "red", "value": null },
-                { "color": "yellow", "value": 100 },
-                { "color": "green", "value": 500 }
-              ]
-            }
-          }
-        },
-        "options": { "colorMode": "background", "graphMode": "area" }
-      },
-      {
-        "title": "리밸런스 횟수",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "kafka_consumer_coordinator_rebalance_total", "legendFormat": "Rebalance" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "thresholds": {
-              "steps": [
-                { "color": "green", "value": null },
-                { "color": "yellow", "value": 5 },
-                { "color": "red", "value": 20 }
-              ]
-            }
-          }
-        },
-        "options": { "colorMode": "background" }
-      },
-      {
-        "title": "할당된 파티션 수",
-        "type": "stat",
-        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "kafka_consumer_coordinator_assigned_partitions", "legendFormat": "Partitions" }
-        ],
-        "fieldConfig": { "defaults": { "unit": "short" } },
-        "options": { "colorMode": "background" }
-      },
-      {
-        "title": "Consumer Lag by Partition",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "kafka_consumer_records_lag", "legendFormat": "partition-{{partition}}" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
+  "uid": "stockflow-kafka",
+  "title": "StockFlow - Kafka",
+  "tags": ["stockflow", "kafka"],
+  "timezone": "Asia/Seoul",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "Consumer Lag (Total)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(kafka_consumer_records_lag)", "legendFormat": "Total Lag" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 10000 }
+            ]
           }
         }
       },
-      {
-        "title": "Consumer Lag Max",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "kafka_consumer_records_lag_max", "legendFormat": "Max Lag" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" },
-            "thresholds": {
-              "mode": "absolute",
-              "steps": [
-                { "color": "green", "value": null },
-                { "color": "yellow", "value": 1000 },
-                { "color": "red", "value": 10000 }
-              ]
-            }
+      "options": { "colorMode": "background", "graphMode": "area" }
+    },
+    {
+      "title": "초당 소비량 (records/s)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(kafka_consumer_records_consumed_total[5m])", "legendFormat": "Throughput" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "thresholds": {
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "green", "value": 500 }
+            ]
           }
         }
       },
-      {
-        "title": "Fetch Latency (avg / max)",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "kafka_consumer_fetch_manager_fetch_latency_avg", "legendFormat": "Fetch Avg" },
-          { "expr": "kafka_consumer_fetch_manager_fetch_latency_max", "legendFormat": "Fetch Max" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "ms",
-            "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
+      "options": { "colorMode": "background", "graphMode": "area" }
+    },
+    {
+      "title": "리밸런스 횟수",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "kafka_consumer_coordinator_rebalance_total", "legendFormat": "Rebalance" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
           }
         }
       },
-      {
-        "title": "Commit Latency / Records per Request",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "kafka_consumer_coordinator_commit_latency_avg", "legendFormat": "Commit Latency Avg (ms)" },
-          { "expr": "kafka_consumer_fetch_manager_records_per_request_avg", "legendFormat": "Records/Request Avg" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "short",
-            "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
-          }
+      "options": { "colorMode": "background" }
+    },
+    {
+      "title": "할당된 파티션 수",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "kafka_consumer_coordinator_assigned_partitions", "legendFormat": "Partitions" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "title": "Consumer Lag by Partition",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "kafka_consumer_records_lag", "legendFormat": "partition-{{partition}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
         }
-      },
-      {
-        "title": "총 소비 바이트",
-        "type": "timeseries",
-        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
-        "datasource": "Prometheus",
-        "targets": [
-          { "expr": "rate(kafka_consumer_bytes_consumed_total[5m])", "legendFormat": "Bytes/s" }
-        ],
-        "fieldConfig": {
-          "defaults": {
-            "unit": "Bps",
-            "custom": { "lineWidth": 2, "fillOpacity": 20, "drawStyle": "line" }
+      }
+    },
+    {
+      "title": "Consumer Lag Max",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "kafka_consumer_records_lag_max", "legendFormat": "Max Lag" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 10000 }
+            ]
           }
         }
       }
-    ],
-    "schemaVersion": 39,
-    "version": 1
-  },
-  "overwrite": true
+    },
+    {
+      "title": "Fetch Latency (avg / max)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "kafka_consumer_fetch_manager_fetch_latency_avg", "legendFormat": "Fetch Avg" },
+        { "expr": "kafka_consumer_fetch_manager_fetch_latency_max", "legendFormat": "Fetch Max" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "Commit Latency / Records per Request",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "kafka_consumer_coordinator_commit_latency_avg", "legendFormat": "Commit Latency Avg (ms)" },
+        { "expr": "kafka_consumer_fetch_manager_records_per_request_avg", "legendFormat": "Records/Request Avg" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "총 소비 바이트",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(kafka_consumer_bytes_consumed_total[5m])", "legendFormat": "Bytes/s" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": { "lineWidth": 2, "fillOpacity": 20, "drawStyle": "line" }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
 }
