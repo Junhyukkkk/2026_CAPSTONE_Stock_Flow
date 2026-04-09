@@ -1,0 +1,190 @@
+{
+  "dashboard": {
+    "uid": "stockflow-app",
+    "title": "StockFlow - Application (Custom Metrics)",
+    "tags": ["stockflow", "application", "custom"],
+    "timezone": "Asia/Seoul",
+    "refresh": "10s",
+    "time": { "from": "now-1h", "to": "now" },
+    "annotations": {
+      "list": [
+        {
+          "name": "Note",
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": false,
+          "type": "dashboard",
+          "iconColor": "rgba(255, 96, 96, 1)"
+        }
+      ]
+    },
+    "panels": [
+      {
+        "title": "⚠️ 이 대시보드는 커스텀 메트릭이 MeterRegistry에 등록되어 있어야 동작합니다",
+        "type": "text",
+        "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
+        "options": {
+          "mode": "markdown",
+          "content": "커스텀 메트릭(`stockflow.*`)이 Prometheus에 노출되지 않으면 패널이 비어있습니다. `PerformanceMetrics` 클래스에서 `MeterRegistry`로 등록했는지 확인하세요."
+        }
+      },
+      {
+        "title": "총 처리 성공",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 2 },
+        "datasource": "Prometheus",
+        "targets": [
+          { "expr": "stockflow_total_processed", "legendFormat": "Processed" }
+        ],
+        "fieldConfig": { "defaults": { "unit": "short" } },
+        "options": { "colorMode": "background", "graphMode": "area" }
+      },
+      {
+        "title": "총 처리 실패",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 2 },
+        "datasource": "Prometheus",
+        "targets": [
+          { "expr": "stockflow_total_failed", "legendFormat": "Failed" }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "red", "value": 1 }
+              ]
+            }
+          }
+        },
+        "options": { "colorMode": "background" }
+      },
+      {
+        "title": "에러율 (%)",
+        "type": "gauge",
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 2 },
+        "datasource": "Prometheus",
+        "targets": [
+          { "expr": "stockflow_error_rate", "legendFormat": "Error Rate" }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent", "min": 0, "max": 10,
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 1 },
+                { "color": "red", "value": 5 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "초당 처리량 (msg/s)",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 2 },
+        "datasource": "Prometheus",
+        "targets": [
+          { "expr": "stockflow_throughput_per_second", "legendFormat": "Throughput" }
+        ],
+        "fieldConfig": { "defaults": { "unit": "ops" } },
+        "options": { "colorMode": "background", "graphMode": "area" }
+      },
+      {
+        "title": "E2E Latency (avg / p50 / p90 / p99)",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+        "datasource": "Prometheus",
+        "targets": [
+          { "expr": "stockflow_e2e_latency_avg", "legendFormat": "avg" },
+          { "expr": "stockflow_e2e_latency_p50", "legendFormat": "p50" },
+          { "expr": "stockflow_e2e_latency_p90", "legendFormat": "p90" },
+          { "expr": "stockflow_e2e_latency_p99", "legendFormat": "p99" }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 500 },
+                { "color": "red", "value": 1000 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Processing Time (avg / min / max)",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+        "datasource": "Prometheus",
+        "targets": [
+          { "expr": "stockflow_processing_time_avg", "legendFormat": "avg" },
+          { "expr": "stockflow_processing_time_min", "legendFormat": "min" },
+          { "expr": "stockflow_processing_time_max", "legendFormat": "max" }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
+          }
+        }
+      },
+      {
+        "title": "System",
+        "type": "row",
+        "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+        "collapsed": false
+      },
+      {
+        "title": "Disk Usage",
+        "type": "gauge",
+        "gridPos": { "h": 5, "w": 8, "x": 0, "y": 15 },
+        "datasource": "Prometheus",
+        "targets": [
+          { "expr": "(disk_total_bytes - disk_free_bytes) / disk_total_bytes * 100", "legendFormat": "Disk Usage %" }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent", "min": 0, "max": 100,
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 70 },
+                { "color": "red", "value": 90 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "CPU Cores",
+        "type": "stat",
+        "gridPos": { "h": 5, "w": 8, "x": 8, "y": 15 },
+        "datasource": "Prometheus",
+        "targets": [
+          { "expr": "system_cpu_count", "legendFormat": "Cores" }
+        ],
+        "fieldConfig": { "defaults": { "unit": "short" } }
+      },
+      {
+        "title": "Process Start Time",
+        "type": "stat",
+        "gridPos": { "h": 5, "w": 8, "x": 16, "y": 15 },
+        "datasource": "Prometheus",
+        "targets": [
+          { "expr": "process_start_time_seconds * 1000", "legendFormat": "Started At" }
+        ],
+        "fieldConfig": { "defaults": { "unit": "dateTimeAsIso" } }
+      }
+    ],
+    "schemaVersion": 39,
+    "version": 1
+  },
+  "overwrite": true
+}

@@ -91,6 +91,13 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ../docs/01-kafka-dashboard.json:/var/lib/grafana/dashboards/01-kafka-dashboard.json
+      - ../docs/02-jvm-dashboard.json:/var/lib/grafana/dashboards/02-jvm-dashboard.json
+      - ../docs/03-redis-hikari-dashboard.json:/var/lib/grafana/dashboards/03-redis-hikari-dashboard.json
+      - ../docs/04-http-logs-dashboard.json:/var/lib/grafana/dashboards/04-http-logs-dashboard.json
+      - ../docs/05-app-custom-dashboard.json:/var/lib/grafana/dashboards/05-app-custom-dashboard.json
     depends_on:
       - prometheus
 
