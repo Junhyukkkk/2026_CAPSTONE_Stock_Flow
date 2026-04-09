@@ -12,7 +12,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "datasource": "Prometheus",
       "targets": [
-        { "expr": "sum(kafka_consumer_records_lag)", "legendFormat": "Total Lag" }
+        { "expr": "sum(kafka_consumer_fetch_manager_records_lag)", "legendFormat": "Total Lag" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -34,7 +34,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "datasource": "Prometheus",
       "targets": [
-        { "expr": "rate(kafka_consumer_records_consumed_total[5m])", "legendFormat": "Throughput" }
+        { "expr": "sum(rate(kafka_consumer_fetch_manager_records_consumed_total[5m]))", "legendFormat": "Throughput" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -56,7 +56,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "datasource": "Prometheus",
       "targets": [
-        { "expr": "kafka_consumer_coordinator_rebalance_total", "legendFormat": "Rebalance" }
+        { "expr": "sum(kafka_consumer_coordinator_rebalance_total)", "legendFormat": "Rebalance" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -78,7 +78,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
       "datasource": "Prometheus",
       "targets": [
-        { "expr": "kafka_consumer_coordinator_assigned_partitions", "legendFormat": "Partitions" }
+        { "expr": "sum(kafka_consumer_coordinator_assigned_partitions)", "legendFormat": "Partitions" }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } },
       "options": { "colorMode": "background" }
@@ -89,7 +89,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "datasource": "Prometheus",
       "targets": [
-        { "expr": "kafka_consumer_records_lag", "legendFormat": "partition-{{partition}}" }
+        { "expr": "kafka_consumer_fetch_manager_records_lag", "legendFormat": "{{client_id}}-{{partition}}" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -104,7 +104,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "datasource": "Prometheus",
       "targets": [
-        { "expr": "kafka_consumer_records_lag_max", "legendFormat": "Max Lag" }
+        { "expr": "kafka_consumer_fetch_manager_records_lag_max", "legendFormat": "{{client_id}}" }
       ],
       "fieldConfig": {
         "defaults": {
@@ -159,7 +159,7 @@
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
       "datasource": "Prometheus",
       "targets": [
-        { "expr": "rate(kafka_consumer_bytes_consumed_total[5m])", "legendFormat": "Bytes/s" }
+        { "expr": "sum(rate(kafka_consumer_fetch_manager_bytes_consumed_total[5m]))", "legendFormat": "Bytes/s" }
       ],
       "fieldConfig": {
         "defaults": {
