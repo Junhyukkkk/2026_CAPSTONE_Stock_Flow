@@ -110,20 +110,21 @@ public class KafkaConsumerConfig {
 
     /**
      * Kafka Listener Container Factory (단일 메시지 처리용)
-     * 
+     *
      * RealtimeConsumer에서 사용
      * 수동 커밋 모드로 설정
      */
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> kafkaListenerContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> kafkaListenerContainerFactory(
+            ConsumerFactory<String, NormalizedTradeDTO> consumerFactory) {
         ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> factory =
             new ConcurrentKafkaListenerContainerFactory<>();
-        
-        factory.setConsumerFactory(consumerFactory());
-        
+
+        factory.setConsumerFactory(consumerFactory);
+
         // 수동 커밋 모드 설정
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
-        
+
         // 동시성 설정 (파티션 수와 동일하게)
         factory.setConcurrency(concurrency);
 
@@ -132,23 +133,24 @@ public class KafkaConsumerConfig {
 
     /**
      * Kafka Listener Container Factory (배치 처리용)
-     * 
+     *
      * StorageConsumer에서 사용
      * 배치 모드로 여러 메시지를 한 번에 처리
      */
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> batchKafkaListenerContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> batchKafkaListenerContainerFactory(
+            ConsumerFactory<String, NormalizedTradeDTO> consumerFactory) {
         ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> factory =
             new ConcurrentKafkaListenerContainerFactory<>();
-        
-        factory.setConsumerFactory(consumerFactory());
-        
+
+        factory.setConsumerFactory(consumerFactory);
+
         // 배치 모드 설정
         factory.setBatchListener(true);
-        
+
         // 수동 커밋 모드 설정
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
-        
+
         // 동시성 설정
         factory.setConcurrency(concurrency);
 
