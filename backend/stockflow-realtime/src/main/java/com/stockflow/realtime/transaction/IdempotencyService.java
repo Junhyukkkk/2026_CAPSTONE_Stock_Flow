@@ -21,8 +21,18 @@ public class IdempotencyService {
 
     private final RedisTemplate<String, String> redisTemplate;
 
+    /**
+     * DB 유니크 키 (symbol, source, trade_id, ts) 와 동일 축 — trade_ts는 epoch ms.
+     */
     private String generateKey(String channel, NormalizedTradeDTO trade) {
-        return String.format("processed:%s:%s:%s", channel, trade.getSource(), trade.getTradeId());
+        return String.format(
+                "processed:%s:%s:%s:%s:%d",
+                channel,
+                trade.getSymbol(),
+                trade.getSource(),
+                trade.getTradeId(),
+                trade.getTimestamp()
+        );
     }
 
     public boolean isAlreadyProcessed(String channel, NormalizedTradeDTO trade) {

@@ -30,6 +30,7 @@ public class StorageService {
 
     private final IdempotencyService idempotencyService;
     private final MarketTickBulkWriter marketTickBulkWriter;
+    private final InstrumentRegistryService instrumentRegistryService;
     private final TransactionTemplate transactionTemplate;
     private final RetryService retryService;
     private final RetryPolicy retryPolicy;
@@ -42,6 +43,7 @@ public class StorageService {
     public StorageService(
             IdempotencyService idempotencyService,
             MarketTickBulkWriter marketTickBulkWriter,
+            InstrumentRegistryService instrumentRegistryService,
             @Qualifier("storageJdbcTransactionTemplate") TransactionTemplate transactionTemplate,
             RetryService retryService,
             RetryPolicy retryPolicy,
@@ -49,6 +51,7 @@ public class StorageService {
             DLQService dlqService) {
         this.idempotencyService = idempotencyService;
         this.marketTickBulkWriter = marketTickBulkWriter;
+        this.instrumentRegistryService = instrumentRegistryService;
         this.transactionTemplate = transactionTemplate;
         this.retryService = retryService;
         this.retryPolicy = retryPolicy;
@@ -112,6 +115,7 @@ public class StorageService {
         List<NormalizedTradeDTO> snapshot = new ArrayList<>(newTrades);
         transactionTemplate.executeWithoutResult(status -> {
             marketTickBulkWriter.insertBatch(newTrades);
+            instrumentRegistryService.registerDistinctFromTrades(newTrades);
             markProcessedAfterCommit(snapshot);
         });
     }
