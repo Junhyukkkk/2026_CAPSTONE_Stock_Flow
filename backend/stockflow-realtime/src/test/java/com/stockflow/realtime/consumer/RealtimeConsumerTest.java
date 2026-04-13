@@ -2,8 +2,8 @@ package com.stockflow.realtime.consumer;
 
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.core.metrics.PerformanceMetrics;
-import com.stockflow.realtime.retry.RetryableProcessor;
-import com.stockflow.realtime.transaction.TransactionManager;
+import com.stockflow.realtime.retry.RetryableProcessorInterface;
+import com.stockflow.realtime.service.RedisPriceService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -11,31 +11,29 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.support.Acknowledgment;
-import org.springframework.kafka.support.KafkaHeaders;
-import org.springframework.messaging.support.GenericMessage;
 
 import java.math.BigDecimal;
-import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * RealtimeConsumer 통합 테스트
+ * RealtimeConsumer 단위 테스트
  */
 @ExtendWith(MockitoExtension.class)
 class RealtimeConsumerTest {
 
     @Mock
-    private RetryableProcessor retryableProcessor;
+    private RetryableProcessorInterface retryableProcessor;
 
     @Mock
     private PerformanceMetrics performanceMetrics;
 
     @Mock
-    private TransactionManager transactionManager;
+    private RedisPriceService redisPriceService;
 
     @Mock
     private Acknowledgment acknowledgment;
@@ -47,64 +45,52 @@ class RealtimeConsumerTest {
 
     @BeforeEach
     void setUp() {
+        long now = System.currentTimeMillis();
         testTrade = NormalizedTradeDTO.builder()
-            .symbol("BTCUSDT")
-            .price(new BigDecimal("50000.00"))
-            .quantity(new BigDecimal("0.1"))
-            .timestamp(Instant.now())
-            .source("binance")
-            .tradeId("test-trade-id-1")
-            .build();
+                .symbol("BTCUSDT")
+                .price(new BigDecimal("50000.00"))
+                .volume(new BigDecimal("0.1"))
+                .timestamp(now)
+                .receivedAt(now)
+                .source("BINANCE")
+                .tradeId("test-trade-id-1")
+                .exchange("BINANCE")
+                .marketType("CRYPTO")
+                .build();
     }
 
     @Test
     void testConsumeRealtimeTrade_Success() {
-        // Given
         when(retryableProcessor.processWithRetry(any(), any(), any(), anyInt(), anyLong()))
-            .thenReturn(true);
+                .thenReturn(true);
 
-        // When
-        realtimeConsumer.consumeRealtimeTrade(
-            testTrade,
-            acknowledgment,
-            0,
-            100L
-        );
+        realtimeConsumer.consumeRealtimeTrade(testTrade, acknowledgment, 0, 100L);
 
-        // Then
         verify(retryableProcessor, times(1)).processWithRetry(
-            eq(testTrade),
-            any(),
-            any(),
-            eq(0),
-            eq(100L)
+                eq(testTrade),
+                any(),
+                any(),
+                eq(0),
+                eq(100L)
         );
         verify(acknowledgment, times(1)).acknowledge();
-        verify(performanceMetrics, times(1)).recordSuccess();
+        verify(performanceMetrics, times(1)).recordSuccessWithLatency(testTrade.getTimestamp());
         verify(performanceMetrics, times(1)).recordProcessingTime(anyLong());
     }
 
     @Test
     void testConsumeRealtimeTrade_Failure() {
-        // Given
         when(retryableProcessor.processWithRetry(any(), any(), any(), anyInt(), anyLong()))
-            .thenReturn(false);
+                .thenReturn(false);
 
-        // When
-        realtimeConsumer.consumeRealtimeTrade(
-            testTrade,
-            acknowledgment,
-            0,
-            100L
-        );
+        realtimeConsumer.consumeRealtimeTrade(testTrade, acknowledgment, 0, 100L);
 
-        // Then
         verify(retryableProcessor, times(1)).processWithRetry(
-            eq(testTrade),
-            any(),
-            any(),
-            eq(0),
-            eq(100L)
+                eq(testTrade),
+                any(),
+                any(),
+                eq(0),
+                eq(100L)
         );
         verify(acknowledgment, never()).acknowledge();
         verify(performanceMetrics, times(1)).recordFailure();

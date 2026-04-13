@@ -20,6 +20,8 @@ import java.util.concurrent.TimeoutException;
 @Component
 public class ErrorClassifier {
 
+    private static final int MAX_CAUSE_CHAIN_DEPTH = 12;
+
     /**
      * 예외를 ErrorType으로 분류
      *
@@ -39,7 +41,7 @@ public class ErrorClassifier {
 
         // 원인 체인에서 SQL/연결/검증 재탐색
         Throwable t = exception;
-        for (int i = 0; i < 12 && t != null; i++) {
+        for (int i = 0; i < MAX_CAUSE_CHAIN_DEPTH && t != null; i++) {
             ErrorType leaf = classifyLeaf(t);
             if (leaf != ErrorType.PROCESSING_ERROR) {
                 return leaf;
@@ -52,7 +54,7 @@ public class ErrorClassifier {
 
     private Throwable unwrapSpringDataCause(Throwable exception) {
         Throwable t = exception;
-        for (int i = 0; i < 12 && t != null; i++) {
+        for (int i = 0; i < MAX_CAUSE_CHAIN_DEPTH && t != null; i++) {
             if (t instanceof DataAccessException && t.getCause() != null) {
                 t = t.getCause();
                 continue;

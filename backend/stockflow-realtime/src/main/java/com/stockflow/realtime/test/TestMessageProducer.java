@@ -25,6 +25,12 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * 테스트 메시지 전송용 컨트롤러
+ *
+ * 정상/비정상 메시지를 Kafka로 전송하여 Consumer 테스트에 활용
+ * test 프로파일에서만 활성화
+ */
 @Slf4j
 @RestController
 @RequestMapping("/test")

@@ -9,6 +9,11 @@ import org.springframework.web.bind.annotation.*;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * 성능 메트릭 조회/리셋용 테스트 컨트롤러
+ *
+ * test 프로파일에서만 활성화
+ */
 @Slf4j
 @RestController
 @RequestMapping("/test/metrics")

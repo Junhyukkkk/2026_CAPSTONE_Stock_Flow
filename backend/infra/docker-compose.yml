@@ -64,6 +64,43 @@ services:
     ports:
       - "5540:5540"
 
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: stockflow-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+    depends_on:
+      - stockflow-realtime
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: stockflow-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ../docs/01-kafka-dashboard.json:/var/lib/grafana/dashboards/01-kafka-dashboard.json
+      - ../docs/02-jvm-dashboard.json:/var/lib/grafana/dashboards/02-jvm-dashboard.json
+      - ../docs/03-redis-hikari-dashboard.json:/var/lib/grafana/dashboards/03-redis-hikari-dashboard.json
+      - ../docs/04-http-logs-dashboard.json:/var/lib/grafana/dashboards/04-http-logs-dashboard.json
+      - ../docs/05-app-custom-dashboard.json:/var/lib/grafana/dashboards/05-app-custom-dashboard.json
+    depends_on:
+      - prometheus
+
   # Spring Boot Consumer
   stockflow-realtime:
     build:
@@ -116,3 +153,5 @@ services:
 
 volumes:
   timescale-data:
+  prometheus-data:
+  grafana-data:

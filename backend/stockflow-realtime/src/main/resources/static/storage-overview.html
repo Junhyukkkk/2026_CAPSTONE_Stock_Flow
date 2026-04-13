@@ -148,8 +148,9 @@
         <button type="button" id="refreshBtn">지금 새로고침</button>
         <label class="chk">
             <input type="checkbox" id="autoRefresh" checked>
-            10초마다 자동 갱신
+            3초마다 자동 갱신
         </label>
+        <span class="muted" id="lastRefresh">마지막 갱신: —</span>
     </div>
     <p id="error" class="err" hidden></p>
 
@@ -205,7 +206,9 @@
         const errorEl = document.getElementById('error');
         const ticksEmpty = document.getElementById('ticksEmpty');
         const barsEmpty = document.getElementById('barsEmpty');
+        const lastRefresh = document.getElementById('lastRefresh');
         let timer = null;
+        const POLL_MS = 3000;
 
         function fmtTs(iso) {
             if (!iso) return '—';
@@ -260,6 +263,7 @@
                         <td>${esc(b.volume)}</td>
                     </tr>
                 `).join('');
+                lastRefresh.textContent = '마지막 갱신: ' + new Date().toLocaleTimeString(undefined, { hour12: false });
             } catch (e) {
                 errorEl.textContent = '불러오기 실패: ' + e.message + ' (앱 주소가 맞는지, CORS가 아닌 동일 출처에서 여는지 확인)';
                 errorEl.hidden = false;
@@ -272,7 +276,7 @@
             if (timer) clearInterval(timer);
             timer = null;
             if (document.getElementById('autoRefresh').checked) {
-                timer = setInterval(load, 10000);
+                timer = setInterval(load, POLL_MS);
             }
         }
 

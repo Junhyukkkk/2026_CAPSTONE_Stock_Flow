@@ -50,4 +50,20 @@ BEGIN
     ELSE
         RAISE NOTICE 'market_ticks_1m 없음 (Flyway V4 미적용 또는 비-Timescale)';
     END IF;
+
+    BEGIN
+        RAISE NOTICE '압춡·보존 정책 job 수: %',
+            (SELECT COUNT(*)::text
+             FROM timescaledb_information.jobs j
+             WHERE j.proc_name IN ('policy_compression', 'policy_retention'));
+    EXCEPTION
+        WHEN OTHERS THEN
+            RAISE NOTICE 'timescaledb_information.jobs 조회 생략: %', SQLERRM;
+    END;
 END $h$;
+
+\echo '=== 참조 테이블 (Flyway V5) ==='
+SELECT
+    (SELECT COUNT(*) FROM instruments)  AS instruments_cnt,
+    (SELECT COUNT(*) FROM users)         AS users_cnt,
+    (SELECT COUNT(*) FROM user_watchlist) AS watchlist_cnt;

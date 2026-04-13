@@ -2,10 +2,7 @@ package com.stockflow.realtime.consumer;
 
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.core.metrics.PerformanceMetrics;
-import com.stockflow.core.util.BatchProcessor;
-import com.stockflow.realtime.retry.RetryableProcessorInterface;
-import com.stockflow.realtime.storage.MarketTickBulkWriter;
-import com.stockflow.realtime.transaction.RealtimeTransactionManager;
+import com.stockflow.realtime.storage.StorageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,7 +15,9 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 /**
@@ -28,19 +27,10 @@ import static org.mockito.Mockito.*;
 class StorageConsumerTest {
 
     @Mock
-    private RetryableProcessorInterface retryableProcessor;
-
-    @Mock
-    private BatchProcessor batchProcessor;
+    private StorageService storageService;
 
     @Mock
     private PerformanceMetrics performanceMetrics;
-
-    @Mock
-    private RealtimeTransactionManager transactionManager;
-
-    @Mock
-    private MarketTickBulkWriter marketTickBulkWriter;
 
     @Mock
     private Acknowledgment acknowledgment;
@@ -71,19 +61,11 @@ class StorageConsumerTest {
 
     @Test
     void testConsumeStorageTrades_Success() {
-        doAnswer(invocation -> {
-            var processor = invocation.<java.util.function.Consumer<List<NormalizedTradeDTO>>>getArgument(1);
-            processor.accept(testTrades);
-            return null;
-        }).when(batchProcessor).processBatch(any(), any());
-
-        when(retryableProcessor.processBatchWithRetry(any(), any(), any()))
-                .thenReturn(true);
+        when(storageService.saveBatch(any(), any())).thenReturn(true);
 
         storageConsumer.consumeStorageTrades(testTrades, acknowledgment);
 
-        verify(batchProcessor, times(1)).processBatch(any(), any());
-        verify(retryableProcessor, times(1)).processBatchWithRetry(any(), any(), any());
+        verify(storageService, times(1)).saveBatch(any(), any());
         verify(acknowledgment, times(1)).acknowledge();
         verify(performanceMetrics, times(1)).recordSuccess();
         verify(performanceMetrics, times(1)).recordProcessingTime(anyLong());
@@ -91,20 +73,22 @@ class StorageConsumerTest {
 
     @Test
     void testConsumeStorageTrades_Failure() {
-        doAnswer(invocation -> {
-            var processor = invocation.<java.util.function.Consumer<List<NormalizedTradeDTO>>>getArgument(1);
-            processor.accept(testTrades);
-            return null;
-        }).when(batchProcessor).processBatch(any(), any());
+        when(storageService.saveBatch(any(), any())).thenReturn(false);
 
-        when(retryableProcessor.processBatchWithRetry(any(), any(), any()))
-                .thenReturn(false);
+        assertThrows(RuntimeException.class, () -> {
+            storageConsumer.consumeStorageTrades(testTrades, acknowledgment);
+        });
 
-        storageConsumer.consumeStorageTrades(testTrades, acknowledgment);
-
-        verify(batchProcessor, times(1)).processBatch(any(), any());
-        verify(retryableProcessor, times(1)).processBatchWithRetry(any(), any(), any());
+        verify(storageService, times(1)).saveBatch(any(), any());
         verify(acknowledgment, never()).acknowledge();
         verify(performanceMetrics, times(1)).recordFailure();
+    }
+
+    @Test
+    void testConsumeStorageTrades_EmptyList() {
+        storageConsumer.consumeStorageTrades(new ArrayList<>(), acknowledgment);
+
+        verify(storageService, never()).saveBatch(any(), any());
+        verify(acknowledgment, times(1)).acknowledge();
     }
 }

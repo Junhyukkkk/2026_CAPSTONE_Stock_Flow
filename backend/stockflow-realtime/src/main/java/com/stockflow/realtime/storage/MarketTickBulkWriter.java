@@ -25,7 +25,7 @@ public class MarketTickBulkWriter {
             INSERT INTO market_ticks (
                 source, symbol, trade_id, price, volume, exchange, ts, received_at, market_type
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (source, trade_id, ts) DO NOTHING
+            ON CONFLICT (symbol, source, trade_id, ts) DO NOTHING
             """;
 
     private final JdbcTemplate jdbcTemplate;

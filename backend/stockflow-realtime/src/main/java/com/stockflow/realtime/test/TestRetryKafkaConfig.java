@@ -19,7 +19,7 @@ import java.util.Map;
 /**
  * Retry Consumer 전용 Kafka 설정
  *
- * test 프로필에서만 활성화
+ * retry.mode=async 프로퍼티가 설정된 경우에만 활성화
  */
 @Configuration
 @ConditionalOnProperty(name = "retry.mode", havingValue = "async")

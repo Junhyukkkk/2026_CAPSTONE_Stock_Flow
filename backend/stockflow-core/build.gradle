@@ -13,6 +13,9 @@ dependencies {
     // ErrorClassifier: DataAccessException, TransactionException
     implementation 'org.springframework:spring-tx'
 
+    // Micrometer (메트릭 수집 - Prometheus 연동)
+    implementation 'io.micrometer:micrometer-core'
+
     // Test dependencies
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }

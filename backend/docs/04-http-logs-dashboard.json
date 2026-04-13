@@ -1,0 +1,137 @@
+{
+  "uid": "stockflow-http",
+  "title": "StockFlow - HTTP & Logs",
+  "tags": ["stockflow", "http", "logback"],
+  "timezone": "Asia/Seoul",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "HTTP RPS",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(rate(http_server_requests_seconds_count[5m]))", "legendFormat": "RPS" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "options": { "colorMode": "background", "graphMode": "area" }
+    },
+    {
+      "title": "5xx 에러율 (%)",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])) / sum(rate(http_server_requests_seconds_count[5m])) * 100", "legendFormat": "5xx %" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 10,
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.1 },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "현재 활성 요청",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "http_server_requests_active", "legendFormat": "Active" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "title": "p99 Latency",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.99, rate(http_server_requests_seconds_bucket[5m])) * 1000", "legendFormat": "p99 (ms)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 500 },
+              { "color": "red", "value": 1000 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "title": "HTTP Latency (p50 / p90 / p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "histogram_quantile(0.5, rate(http_server_requests_seconds_bucket[5m])) * 1000", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.9, rate(http_server_requests_seconds_bucket[5m])) * 1000", "legendFormat": "p90" },
+        { "expr": "histogram_quantile(0.99, rate(http_server_requests_seconds_bucket[5m])) * 1000", "legendFormat": "p99" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "HTTP Status별 RPS",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum by(status) (rate(http_server_requests_seconds_count[5m]))", "legendFormat": "{{status}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "Logback Events",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 12 },
+      "collapsed": false
+    },
+    {
+      "title": "Log Events Rate by Level",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 13 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(logback_events_total{level=\"error\"}[5m])", "legendFormat": "ERROR" },
+        { "expr": "rate(logback_events_total{level=\"warn\"}[5m])", "legendFormat": "WARN" },
+        { "expr": "rate(logback_events_total{level=\"info\"}[5m])", "legendFormat": "INFO" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "ERROR" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "WARN" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "INFO" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

@@ -1,0 +1,166 @@
+{
+  "uid": "stockflow-data-infra",
+  "title": "StockFlow - Redis & HikariCP",
+  "tags": ["stockflow", "redis", "hikaricp", "database"],
+  "timezone": "Asia/Seoul",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "HikariCP",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "title": "Connection 사용률 (%)",
+      "type": "gauge",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "hikaricp_connections_active / hikaricp_connections * 100", "legendFormat": "Usage %" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 85 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Pending 요청",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "hikaricp_connections_pending", "legendFormat": "Pending" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "title": "Timeout 횟수",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "hikaricp_connections_timeout_total", "legendFormat": "Timeouts" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "options": { "colorMode": "background" }
+    },
+    {
+      "title": "총 연결 수",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "hikaricp_connections", "legendFormat": "Total" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "options": { "colorMode": "background", "graphMode": "area" }
+    },
+    {
+      "title": "Connection Pool (Total / Active / Idle)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "hikaricp_connections", "legendFormat": "Total" },
+        { "expr": "hikaricp_connections_active", "legendFormat": "Active" },
+        { "expr": "hikaricp_connections_idle", "legendFormat": "Idle" },
+        { "expr": "hikaricp_connections_pending", "legendFormat": "Pending" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "Connection Timing (Acquire / Usage / Creation)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(hikaricp_connections_acquire_seconds_sum[5m]) / rate(hikaricp_connections_acquire_seconds_count[5m]) * 1000", "legendFormat": "Acquire (ms)" },
+        { "expr": "rate(hikaricp_connections_usage_seconds_sum[5m]) / rate(hikaricp_connections_usage_seconds_count[5m]) * 1000", "legendFormat": "Usage (ms)" },
+        { "expr": "rate(hikaricp_connections_creation_seconds_sum[5m]) / rate(hikaricp_connections_creation_seconds_count[5m]) * 1000", "legendFormat": "Creation (ms)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "Redis (Lettuce)",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "collapsed": false
+    },
+    {
+      "title": "Redis Connection (Active / Idle)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "spring_data_redis_connections_active", "legendFormat": "Active" },
+        { "expr": "spring_data_redis_connections_idle", "legendFormat": "Idle" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 15, "drawStyle": "line" }
+        }
+      }
+    },
+    {
+      "title": "Redis Command Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "rate(lettuce_command_completion_seconds_sum[5m]) / rate(lettuce_command_completion_seconds_count[5m]) * 1000", "legendFormat": "Completion Avg (ms)" },
+        { "expr": "rate(lettuce_command_firstresponse_seconds_sum[5m]) / rate(lettuce_command_firstresponse_seconds_count[5m]) * 1000", "legendFormat": "First Response Avg (ms)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "drawStyle": "line" }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

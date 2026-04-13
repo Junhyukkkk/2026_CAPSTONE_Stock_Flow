@@ -60,7 +60,9 @@ class IdempotencyServiceTest {
         boolean result = idempotencyService.isAlreadyProcessed(CH, testTrade);
 
         assertTrue(result);
-        verify(redisTemplate, times(1)).hasKey(contains("processed:storage:BINANCE:test-trade-id-1"));
+        verify(redisTemplate, times(1)).hasKey(argThat((String key) ->
+                key.startsWith("processed:storage:BTCUSDT:BINANCE:test-trade-id-1:")
+                        && key.endsWith(String.valueOf(testTrade.getTimestamp()))));
     }
 
     @Test
@@ -79,7 +81,8 @@ class IdempotencyServiceTest {
         idempotencyService.markAsProcessed(CH, testTrade, ttl);
 
         verify(valueOperations, times(1)).set(
-                contains("processed:storage:BINANCE"),
+                argThat((String key) ->
+                        key.contains("processed:storage:BTCUSDT:BINANCE:test-trade-id-1")),
                 eq("1"),
                 eq(ttl),
                 eq(TimeUnit.SECONDS)
