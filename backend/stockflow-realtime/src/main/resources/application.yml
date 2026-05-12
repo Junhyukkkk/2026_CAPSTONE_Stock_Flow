@@ -60,6 +60,12 @@ spring:
     # TimescaleDB create_hypertable / 연속 집계 등이 Flyway 기본(마이그레이션당 TX)과 충돌할 수 있음
     execute-in-transaction: false
 
+  batch:
+    job:
+      enabled: false          # 애플리케이션 시작 시 자동 실행 방지 (BatchScheduler가 트리거)
+    jdbc:
+      initialize-schema: never  # 스키마는 Flyway V10으로 관리
+
   jpa:
     hibernate:
       ddl-auto: none
