@@ -53,3 +53,7 @@ coverage/
 
 STOCKFLOW_MULTI_MODULE_GUIDE.md
 STOCKFLOW_REALTIME_GUIDE.md
+
+# 작업 중인 초안 문서 (정리 전)
+backend/docs/ConsumerTest.md
+backend/docs/PartitionTest.md

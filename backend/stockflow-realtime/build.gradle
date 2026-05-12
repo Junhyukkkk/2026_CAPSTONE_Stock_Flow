@@ -28,6 +28,9 @@ dependencies {
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.flywaydb:flyway-database-postgresql'
 
+    // Spring Batch (일일 지표 계산·데이터 정합성 검증 Job)
+    implementation 'org.springframework.boot:spring-boot-starter-batch'
+
     // Actuator (모니터링 및 헬스체크)
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     
