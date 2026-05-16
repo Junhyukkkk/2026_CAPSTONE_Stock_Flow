@@ -22,4 +22,18 @@ public class DailyIndicatorItem {
     private BigDecimal macd;
     private BigDecimal macdSignal;
     private BigDecimal macdHist;
+
+    // 볼린저 밴드
+    private BigDecimal bbUpper;     // 상단 밴드 (MA20 + 2σ)
+    private BigDecimal bbLower;     // 하단 밴드 (MA20 - 2σ)
+
+    // 스토캐스틱
+    private BigDecimal stochK;      // %K (14일)
+    private BigDecimal stochD;      // %D (%K의 3일 SMA)
+
+    // ATR
+    private BigDecimal atr14;       // 14일 ATR
+
+    // OBV
+    private Long obv;               // On Balance Volume
 }
