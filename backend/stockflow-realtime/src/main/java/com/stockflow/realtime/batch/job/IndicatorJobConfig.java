@@ -2,6 +2,7 @@ package com.stockflow.realtime.batch.job;
 
 import com.stockflow.realtime.batch.item.DailyIndicatorItem;
 import com.stockflow.realtime.batch.listener.BatchJobRunListener;
+import com.stockflow.realtime.batch.service.OhlcvData;
 import com.stockflow.realtime.batch.service.TechnicalIndicatorService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -82,23 +83,29 @@ public class IndicatorJobConfig {
             List<DailyIndicatorItem> batch = new ArrayList<>();
 
             for (String symbol : symbols) {
-                // 2. 심볼별 최근 HISTORY_DAYS일 종가 조회 (오래된 순)
-                List<BigDecimal> closes = jdbcTemplate.queryForList(
+                // 2. 심볼별 최근 HISTORY_DAYS일 OHLCV 조회 (오래된 순)
+                List<OhlcvData> ohlcvList = jdbcTemplate.query(
                         """
-                        SELECT close FROM symbol_daily_ohlcv
+                        SELECT open, high, low, close, volume FROM symbol_daily_ohlcv
                         WHERE symbol = ?
                           AND trade_date <= ?
                         ORDER BY trade_date ASC
                         LIMIT ?
                         """,
-                        BigDecimal.class,
+                        (rs, rowNum) -> new OhlcvData(
+                                rs.getBigDecimal("open"),
+                                rs.getBigDecimal("high"),
+                                rs.getBigDecimal("low"),
+                                rs.getBigDecimal("close"),
+                                rs.getBigDecimal("volume")
+                        ),
                         symbol, Date.valueOf(target), HISTORY_DAYS
                 );
 
-                if (closes.isEmpty()) continue;
+                if (ohlcvList.isEmpty()) continue;
 
-                // 3. 지표 계산
-                DailyIndicatorItem item = indicatorService.compute(symbol, target, closes);
+                // 3. 지표 계산 (OHLCV 기반)
+                DailyIndicatorItem item = indicatorService.computeWithOhlcv(symbol, target, ohlcvList);
                 batch.add(item);
 
                 // 4. 100건마다 중간 UPSERT (메모리 절약)
@@ -122,8 +129,9 @@ public class IndicatorJobConfig {
     private void upsertIndicators(List<DailyIndicatorItem> items) {
         String sql = """
                 INSERT INTO symbol_daily_indicators
-                    (symbol, trade_date, ma5, ma20, ma60, rsi14, macd, macd_signal, macd_hist, computed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    (symbol, trade_date, ma5, ma20, ma60, rsi14, macd, macd_signal, macd_hist,
+                     bb_upper, bb_lower, stoch_k, stoch_d, atr14, obv, computed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
                 ON CONFLICT (symbol, trade_date) DO UPDATE SET
                     ma5         = EXCLUDED.ma5,
                     ma20        = EXCLUDED.ma20,
@@ -132,6 +140,12 @@ public class IndicatorJobConfig {
                     macd        = EXCLUDED.macd,
                     macd_signal = EXCLUDED.macd_signal,
                     macd_hist   = EXCLUDED.macd_hist,
+                    bb_upper    = EXCLUDED.bb_upper,
+                    bb_lower    = EXCLUDED.bb_lower,
+                    stoch_k     = EXCLUDED.stoch_k,
+                    stoch_d     = EXCLUDED.stoch_d,
+                    atr14       = EXCLUDED.atr14,
+                    obv         = EXCLUDED.obv,
                     computed_at = NOW()
                 """;
 
@@ -145,6 +159,16 @@ public class IndicatorJobConfig {
             ps.setBigDecimal(7, item.getMacd());
             ps.setBigDecimal(8, item.getMacdSignal());
             ps.setBigDecimal(9, item.getMacdHist());
+            ps.setBigDecimal(10, item.getBbUpper());
+            ps.setBigDecimal(11, item.getBbLower());
+            ps.setBigDecimal(12, item.getStochK());
+            ps.setBigDecimal(13, item.getStochD());
+            ps.setBigDecimal(14, item.getAtr14());
+            if (item.getObv() != null) {
+                ps.setLong(15, item.getObv());
+            } else {
+                ps.setNull(15, java.sql.Types.BIGINT);
+            }
         });
     }
 }
