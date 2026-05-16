@@ -1,7 +1,7 @@
 package com.stockflow.realtime.controller;
 
-import com.stockflow.realtime.controller.dto.IndicatorResponse;
-import com.stockflow.realtime.service.IndicatorQueryService;
+import com.stockflow.realtime.stock.IndicatorHistoryService;
+import com.stockflow.realtime.stock.dto.IndicatorResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -19,7 +19,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class IndicatorController {
 
-    private final IndicatorQueryService indicatorQueryService;
+    private final IndicatorHistoryService indicatorHistoryService;
 
     @Operation(summary = "최신 지표 조회", description = "특정 심볼의 가장 최근 기술적 지표를 조회합니다.")
     @GetMapping("/{symbol}")
@@ -27,7 +27,7 @@ public class IndicatorController {
             @Parameter(description = "종목 심볼 (예: AAPL, BTCUSDT)")
             @PathVariable String symbol) {
 
-        return indicatorQueryService.getLatest(symbol)
+        return indicatorHistoryService.getLatest(symbol)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -40,7 +40,7 @@ public class IndicatorController {
             @Parameter(description = "조회할 일수 (기본값: 30)")
             @RequestParam(defaultValue = "30") int days) {
 
-        List<IndicatorResponse> history = indicatorQueryService.getHistory(symbol, days);
+        List<IndicatorResponse> history = indicatorHistoryService.getHistory(symbol, days);
 
         if (history.isEmpty()) {
             return ResponseEntity.notFound().build();
@@ -59,7 +59,7 @@ public class IndicatorController {
             @Parameter(description = "종료일 (yyyy-MM-dd)")
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
 
-        List<IndicatorResponse> results = indicatorQueryService.getByDateRange(symbol, from, to);
+        List<IndicatorResponse> results = indicatorHistoryService.getIndicators(symbol, from, to);
 
         if (results.isEmpty()) {
             return ResponseEntity.notFound().build();
