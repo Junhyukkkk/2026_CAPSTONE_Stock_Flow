@@ -37,7 +37,7 @@ class IdempotencyServiceTest {
 
     @BeforeEach
     void setUp() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 
         long now = System.currentTimeMillis();
         testTrade = NormalizedTradeDTO.builder()
