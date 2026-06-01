@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockFlow · 대시보드</title>
+    <link rel="stylesheet" href="assets/app.css">
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+</head>
+<body>
+<div class="container">
+    <div class="flex-between">
+        <div>
+            <div class="page-title">대시보드</div>
+            <div class="page-sub">실시간 주가 수집 · 분석 · 백테스팅 통합 모니터</div>
+        </div>
+        <div class="row" style="flex:0; gap:8px;">
+            <select id="marketFilter" style="width:140px;">
+                <option value="">전체 마켓</option>
+                <option value="STOCK">STOCK</option>
+                <option value="CRYPTO">CRYPTO</option>
+            </select>
+            <button class="btn-ghost btn-sm" onclick="loadOverview()">새로고침</button>
+        </div>
+    </div>
+
+    <!-- 통계 -->
+    <div class="grid grid-4 mt-16">
+        <div class="card stat"><div class="label">활성 종목</div><div class="value" id="statActive">-</div></div>
+        <div class="card stat"><div class="label">실시간 가격 보유</div><div class="value" id="statRt">-</div></div>
+        <div class="card stat"><div class="label">상승 상위</div><div class="value up" id="statGain">-</div></div>
+        <div class="card stat"><div class="label">하락 상위</div><div class="value down" id="statLose">-</div></div>
+    </div>
+
+    <!-- 등락 랭킹 -->
+    <div class="grid grid-2 mt-16">
+        <div class="card">
+            <h3>🔺 상승 상위</h3>
+            <table><thead><tr><th>종목</th><th>현재가</th><th>등락률</th></tr></thead>
+                <tbody id="gainersBody"><tr><td colspan="3" class="spinner">불러오는 중...</td></tr></tbody>
+            </table>
+        </div>
+        <div class="card">
+            <h3>🔻 하락 상위</h3>
+            <table><thead><tr><th>종목</th><th>현재가</th><th>등락률</th></tr></thead>
+                <tbody id="losersBody"><tr><td colspan="3" class="spinner">불러오는 중...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 실시간 워치리스트 -->
+    <div class="card mt-16">
+        <div class="flex-between">
+            <h3>⚡ 실시간 워치리스트 (WebSocket)</h3>
+            <div class="row" style="flex:0; gap:8px;">
+                <input type="text" id="watchInput" placeholder="심볼 입력 (예: BTCUSDT)" style="width:200px;">
+                <button class="btn btn-sm" onclick="addWatch()">구독</button>
+            </div>
+        </div>
+        <div id="watchTags" class="flex flex-wrap mt-16"></div>
+        <div class="grid grid-4 mt-16" id="watchGrid">
+            <div class="hint">심볼을 구독하면 실시간 가격이 여기에 표시됩니다. 서버가 해당 종목 데이터를 수신 중이어야 갱신됩니다.</div>
+        </div>
+    </div>
+</div>
+
+<script src="assets/api.js"></script>
+<script>
+    renderNav('index.html');
+
+    async function loadOverview() {
+        const mt = document.getElementById('marketFilter').value;
+        try {
+            const ov = await API.marketOverview(mt);
+            document.getElementById('statActive').textContent = ov.totalActive;
+            document.getElementById('statRt').textContent = ov.withRealtimePrice;
+            document.getElementById('statGain').textContent = ov.topGainers?.length ? fmtPct(ov.topGainers[0].changePercent) : '-';
+            document.getElementById('statLose').textContent = ov.topLosers?.length ? fmtPct(ov.topLosers[0].changePercent) : '-';
+            renderRank('gainersBody', ov.topGainers);
+            renderRank('losersBody', ov.topLosers);
+        } catch (e) {
+            toast('시장 개요 조회 실패: ' + e.message, 'err');
+        }
+    }
+
+    function renderRank(id, items) {
+        const body = document.getElementById(id);
+        if (!items || !items.length) { body.innerHTML = '<tr><td colspan="3" class="muted center">데이터 없음</td></tr>'; return; }
+        body.innerHTML = items.map(it => `
+            <tr class="clickable" onclick="location.href='stocks.html?symbol=${it.symbol}'">
+                <td>${it.symbol} <span class="muted" style="font-size:11px">${it.name || ''}</span></td>
+                <td>${fmtPrice(it.currentPrice)}</td>
+                <td class="${signClass(it.changePercent)}">${fmtPct(it.changePercent)}</td>
+            </tr>`).join('');
+    }
+
+    // ---- 실시간 워치리스트 ----
+    let stomp = null;
+    const subs = {};
+    const prices = {};
+
+    function addWatch() {
+        const input = document.getElementById('watchInput');
+        const symbol = input.value.trim().toUpperCase();
+        if (!symbol) return;
+        if (subs[symbol]) { toast('이미 구독 중입니다', 'err'); return; }
+        if (!stomp || !stomp.connected) { toast('서버 연결 대기 중입니다', 'err'); return; }
+        subs[symbol] = stomp.subscribe('/topic/price/' + symbol, (m) => {
+            prices[symbol] = JSON.parse(m.body);
+            renderWatch();
+        });
+        prices[symbol] = prices[symbol] || { symbol, marketType: '-' };
+        input.value = '';
+        renderTags();
+        renderWatch();
+        // 초기값은 REST로 한번 채워줌
+        API.latestPrice(symbol).then(p => { if (p) { prices[symbol] = p; renderWatch(); } }).catch(() => {});
+    }
+
+    function removeWatch(symbol) {
+        subs[symbol]?.unsubscribe();
+        delete subs[symbol];
+        delete prices[symbol];
+        renderTags();
+        renderWatch();
+    }
+
+    function renderTags() {
+        document.getElementById('watchTags').innerHTML = Object.keys(subs).map(s =>
+            `<span class="tag">${s}<span class="x" onclick="removeWatch('${s}')">&times;</span></span>`).join('');
+    }
+
+    function renderWatch() {
+        const grid = document.getElementById('watchGrid');
+        const keys = Object.keys(prices);
+        if (!keys.length) {
+            grid.innerHTML = '<div class="hint">심볼을 구독하면 실시간 가격이 여기에 표시됩니다.</div>';
+            return;
+        }
+        grid.innerHTML = keys.map(s => {
+            const d = prices[s];
+            return `<div class="card" style="padding:16px;">
+                <div class="flex-between"><b>${s}</b><span class="badge ${(d.marketType||'').toLowerCase()}">${d.marketType||'-'}</span></div>
+                <div style="font-size:24px;font-weight:700;margin:8px 0;">${fmtPrice(d.price)}</div>
+                <div class="${signClass(d.changePercent)}">${fmtPct(d.changePercent)}</div>
+                <div class="muted" style="font-size:11px;margin-top:8px;">${fmtTime(d.timestamp)}</div>
+            </div>`;
+        }).join('');
+    }
+
+    document.getElementById('watchInput').addEventListener('keypress', e => { if (e.key === 'Enter') addWatch(); });
+    document.getElementById('marketFilter').addEventListener('change', loadOverview);
+
+    stomp = connectStomp();
+    loadOverview();
+</script>
+</body>
+</html>

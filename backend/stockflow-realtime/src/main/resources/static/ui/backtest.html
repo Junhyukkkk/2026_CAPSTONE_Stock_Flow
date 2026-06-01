@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockFlow · 백테스팅</title>
+    <link rel="stylesheet" href="assets/app.css">
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<div class="container">
+    <div class="page-title">백테스팅</div>
+    <div class="page-sub">전략 설정 · 과거 일봉 데이터로 실행 · 수익률/MDD/승률 + 자산곡선 + 체결내역</div>
+
+    <div class="grid grid-2 mt-16">
+        <!-- 실행 폼 -->
+        <div class="card">
+            <h3>전략 실행</h3>
+            <div class="field">
+                <label>종목 심볼</label>
+                <input type="text" id="symbol" placeholder="예: AAPL" value="AAPL">
+            </div>
+            <div class="field">
+                <label>전략 타입</label>
+                <select id="strategyType" onchange="renderParams()">
+                    <option value="BUY_AND_HOLD">BUY_AND_HOLD (매수 후 보유)</option>
+                    <option value="MA_CROSSOVER" selected>MA_CROSSOVER (이동평균 교차)</option>
+                    <option value="RSI">RSI (과매수/과매도)</option>
+                </select>
+            </div>
+            <div id="paramFields"></div>
+            <div class="row">
+                <div class="field"><label>초기 자본</label><input type="number" id="initialCash" value="10000"></div>
+            </div>
+            <div class="row">
+                <div class="field"><label>시작일</label><input type="date" id="from"></div>
+                <div class="field"><label>종료일</label><input type="date" id="to"></div>
+            </div>
+            <div class="flex">
+                <button class="btn" onclick="runBacktest()">▶ 백테스트 실행</button>
+                <button class="btn-ghost" onclick="saveStrategy()">전략 저장</button>
+            </div>
+        </div>
+
+        <!-- 저장된 전략 -->
+        <div class="card">
+            <div class="flex-between">
+                <h3>저장된 전략</h3>
+                <button class="btn-ghost btn-sm" onclick="loadStrategies()">새로고침</button>
+            </div>
+            <table>
+                <thead><tr><th>이름</th><th>심볼</th><th>타입</th><th></th></tr></thead>
+                <tbody id="strategyBody"><tr><td colspan="4" class="spinner">불러오는 중...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 결과 -->
+    <div id="result" class="hidden">
+        <div class="grid grid-4 mt-16">
+            <div class="card stat"><div class="label">누적 수익률</div><div class="value" id="rTotal">-</div></div>
+            <div class="card stat"><div class="label">CAGR</div><div class="value" id="rCagr">-</div></div>
+            <div class="card stat"><div class="label">최대 낙폭 (MDD)</div><div class="value down" id="rMdd">-</div></div>
+            <div class="card stat"><div class="label">승률 / 체결수</div><div class="value" id="rWin">-</div></div>
+        </div>
+
+        <div class="card mt-16">
+            <div class="flex-between"><h3 id="resultTitle">자산 곡선</h3><span class="muted" id="resultMeta"></span></div>
+            <div class="pane-label">평가금액(Equity)</div>
+            <div id="equityChart" class="chart-box"></div>
+            <div class="pane-label mt-16">낙폭(Drawdown %)</div>
+            <div id="ddChart" class="chart-sm"></div>
+        </div>
+
+        <div class="card mt-16">
+            <h3>체결 내역</h3>
+            <div style="max-height:360px; overflow-y:auto;">
+                <table>
+                    <thead><tr><th>#</th><th>일자</th><th>구분</th><th>가격</th><th>수량</th><th>현금</th><th>평가금액</th><th>손익%</th></tr></thead>
+                    <tbody id="tradeBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="assets/api.js"></script>
+<script>
+    renderNav('backtest.html');
+
+    document.getElementById('from').value = isoDaysAgo(365);
+    document.getElementById('to').value = todayIso();
+
+    // ---- 전략 파라미터 동적 폼 ----
+    const PARAM_DEFS = {
+        BUY_AND_HOLD: [],
+        MA_CROSSOVER: [['shortPeriod', '단기 기간', 5], ['longPeriod', '장기 기간', 20]],
+        RSI: [['period', 'RSI 기간', 14], ['oversold', '과매도 기준', 30], ['overbought', '과매수 기준', 70]],
+    };
+    function renderParams() {
+        const type = document.getElementById('strategyType').value;
+        const defs = PARAM_DEFS[type];
+        const el = document.getElementById('paramFields');
+        if (!defs.length) { el.innerHTML = '<div class="hint" style="margin-bottom:14px;">파라미터 없음 (시작일 매수 → 종료일 평가)</div>'; return; }
+        el.innerHTML = '<div class="row">' + defs.map(([k, label, def]) =>
+            `<div class="field"><label>${label}</label><input type="number" data-param="${k}" value="${def}"></div>`).join('') + '</div>';
+    }
+    function collectParams() {
+        const p = {};
+        document.querySelectorAll('#paramFields [data-param]').forEach(i => p[i.dataset.param] = Number(i.value));
+        return p;
+    }
+    renderParams();
+
+    // ---- 백테스트 실행 ----
+    async function runBacktest() {
+        const body = {
+            symbol: document.getElementById('symbol').value.trim().toUpperCase(),
+            strategyType: document.getElementById('strategyType').value,
+            params: collectParams(),
+            initialCash: Number(document.getElementById('initialCash').value),
+            from: document.getElementById('from').value,
+            to: document.getElementById('to').value,
+        };
+        if (!body.symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
+        try {
+            toast('백테스트 실행 중...');
+            const run = await API.runAdHoc(body);
+            await showResult(run);
+            toast('백테스트 완료', 'ok');
+        } catch (e) { toast('실행 실패: ' + e.message, 'err'); }
+    }
+
+    let eqChart = null, ddChart = null;
+    async function showResult(run) {
+        document.getElementById('result').classList.remove('hidden');
+        const tr = Number(run.totalReturnPct);
+        document.getElementById('rTotal').textContent = fmtPct(run.totalReturnPct);
+        document.getElementById('rTotal').className = 'value ' + signClass(tr);
+        document.getElementById('rCagr').textContent = fmtPct(run.cagrPct);
+        document.getElementById('rMdd').textContent = fmtPct(run.mddPct);
+        document.getElementById('rWin').textContent = `${fmtNum(run.winRatePct)}% / ${run.tradeCount ?? 0}건`;
+        document.getElementById('resultTitle').textContent = `${run.symbol} · ${run.strategyType}`;
+        document.getElementById('resultMeta').textContent =
+            `${run.fromDate} ~ ${run.toDate} · 초기 ${fmtNum(run.initialCash)} → 최종 ${fmtNum(run.finalEquity)} · ${run.barCount ?? 0} bars`;
+
+        // 자산 곡선
+        const curve = await API.equityCurve(run.id) || [];
+        if (eqChart) eqChart.remove();
+        if (ddChart) ddChart.remove();
+        const elE = document.getElementById('equityChart'); elE.innerHTML = '';
+        const elD = document.getElementById('ddChart'); elD.innerHTML = '';
+        if (curve.length) {
+            eqChart = LightweightCharts.createChart(elE, baseChartOpts(360));
+            eqChart.addAreaSeries({ lineColor: '#00d4ff', topColor: '#00d4ff44', bottomColor: '#00d4ff00', lineWidth: 2 })
+                .setData(curve.map(p => ({ time: p.tradeDate, value: +p.equity })));
+            eqChart.timeScale().fitContent();
+
+            ddChart = LightweightCharts.createChart(elD, baseChartOpts(180));
+            ddChart.addAreaSeries({ lineColor: '#ff5e6c', topColor: '#ff5e6c00', bottomColor: '#ff5e6c44', lineWidth: 1 })
+                .setData(curve.map(p => ({ time: p.tradeDate, value: +p.drawdownPct })));
+            ddChart.timeScale().fitContent();
+        } else {
+            elE.innerHTML = '<div class="spinner">자산 곡선 데이터가 없습니다.</div>';
+        }
+
+        // 체결 내역
+        const trades = await API.runTrades(run.id) || [];
+        const body = document.getElementById('tradeBody');
+        body.innerHTML = trades.length ? trades.map(t => `
+            <tr>
+                <td>${t.seq}</td><td>${t.tradeDate}</td>
+                <td class="${t.side==='BUY'?'up':'down'}">${t.side}</td>
+                <td>${fmtPrice(t.price)}</td><td>${fmtNum(t.quantity, 4)}</td>
+                <td>${fmtNum(t.cashAfter)}</td><td>${fmtNum(t.equityAfter)}</td>
+                <td class="${signClass(t.pnlPct)}">${t.pnlPct != null ? fmtPct(t.pnlPct) : '-'}</td>
+            </tr>`).join('') : '<tr><td colspan="8" class="muted center">체결 없음</td></tr>';
+    }
+
+    function baseChartOpts(height) {
+        return {
+            height,
+            layout: { background: { color: 'transparent' }, textColor: '#8b92a8' },
+            grid: { vertLines: { color: '#2d3346' }, horzLines: { color: '#2d3346' } },
+            timeScale: { borderColor: '#2d3346' },
+            rightPriceScale: { borderColor: '#2d3346' },
+        };
+    }
+
+    // ---- 전략 저장/목록 ----
+    async function saveStrategy() {
+        const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+        const type = document.getElementById('strategyType').value;
+        const body = {
+            name: `${symbol}-${type}`,
+            symbol,
+            strategyType: type,
+            params: collectParams(),
+            initialCash: Number(document.getElementById('initialCash').value),
+        };
+        try {
+            await API.createStrategy(body);
+            toast('전략 저장됨', 'ok');
+            loadStrategies();
+        } catch (e) { toast('저장 실패: ' + e.message, 'err'); }
+    }
+
+    async function loadStrategies() {
+        try {
+            const list = await API.strategies() || [];
+            const body = document.getElementById('strategyBody');
+            body.innerHTML = list.length ? list.map(s => `
+                <tr>
+                    <td>${s.name}</td><td>${s.symbol}</td><td>${s.strategyType}</td>
+                    <td style="white-space:nowrap;">
+                        <button class="btn btn-sm" onclick="runSaved(${s.id})">실행</button>
+                        <button class="btn-danger btn-sm" onclick="delStrategy(${s.id})">삭제</button>
+                    </td>
+                </tr>`).join('') : '<tr><td colspan="4" class="muted center">저장된 전략 없음</td></tr>';
+        } catch (e) { toast('전략 목록 조회 실패: ' + e.message, 'err'); }
+    }
+
+    async function runSaved(id) {
+        try {
+            const run = await API.runSaved(id, document.getElementById('from').value, document.getElementById('to').value);
+            if (!run) { toast('전략을 찾을 수 없습니다', 'err'); return; }
+            await showResult(run);
+            window.scrollTo({ top: document.getElementById('result').offsetTop, behavior: 'smooth' });
+            toast('실행 완료', 'ok');
+        } catch (e) { toast('실행 실패: ' + e.message, 'err'); }
+    }
+
+    async function delStrategy(id) {
+        if (!confirm('이 전략을 삭제할까요?')) return;
+        await API.deleteStrategy(id);
+        loadStrategies();
+    }
+
+    loadStrategies();
+</script>
+</body>
+</html>
