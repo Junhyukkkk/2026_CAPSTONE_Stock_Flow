@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockFlow · 종목 & 차트</title>
+    <link rel="stylesheet" href="assets/app.css">
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        .layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
+        @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+        .stock-list { max-height: 620px; overflow-y: auto; }
+        .stock-row { padding: 10px 12px; border-radius: 8px; cursor: pointer; display:flex; justify-content:space-between; align-items:center; }
+        .stock-row:hover { background: var(--card-2); }
+        .stock-row.sel { background: var(--accent); color:#07111a; }
+        .stock-row.sel .muted, .stock-row.sel .up, .stock-row.sel .down { color:#07111a !important; }
+        .pane-label { font-size:12px; color:var(--text-dim); margin:4px 0; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="page-title">종목 & 차트</div>
+    <div class="page-sub">종목 검색 · 일봉 캔들차트 · 기술적 지표(MA/RSI/MACD/볼린저) · 실시간 시세</div>
+
+    <div class="layout mt-16">
+        <!-- 좌: 종목 목록 -->
+        <div class="card">
+            <div class="field">
+                <input type="text" id="search" placeholder="🔍 종목 검색 (심볼/이름)">
+            </div>
+            <div class="field">
+                <select id="marketFilter">
+                    <option value="">전체 마켓</option>
+                    <option value="STOCK">STOCK</option>
+                    <option value="CRYPTO">CRYPTO</option>
+                </select>
+            </div>
+            <div class="stock-list" id="stockList"><div class="spinner">불러오는 중...</div></div>
+        </div>
+
+        <!-- 우: 상세 -->
+        <div>
+            <div class="card" id="detailHeader">
+                <div class="muted center">왼쪽에서 종목을 선택하세요.</div>
+            </div>
+
+            <div class="card mt-16 hidden" id="chartCard">
+                <div class="flex-between">
+                    <h3 id="chartTitle">캔들차트</h3>
+                    <div class="row" style="flex:0; gap:8px;">
+                        <select id="period" style="width:120px;">
+                            <option value="90">최근 90일</option>
+                            <option value="180" selected>최근 180일</option>
+                            <option value="365">최근 1년</option>
+                            <option value="730">최근 2년</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="pane-label">가격 + 이동평균(MA5/20/60) + 볼린저밴드 + 거래량</div>
+                <div id="priceChart" class="chart-box"></div>
+                <div class="pane-label mt-16">RSI(14)</div>
+                <div id="rsiChart" class="chart-sm"></div>
+                <div class="pane-label mt-16">MACD</div>
+                <div id="macdChart" class="chart-sm"></div>
+            </div>
+
+            <div class="card mt-16 hidden" id="indicatorCard">
+                <h3>최신 기술적 지표</h3>
+                <div class="grid grid-4" id="indicatorGrid"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="assets/api.js"></script>
+<script>
+    renderNav('stocks.html');
+
+    let allStocks = [];
+    let selected = null;
+    let stomp = null, liveSub = null;
+    let charts = {};
+
+    // ---- 종목 목록 ----
+    async function loadStocks() {
+        const mt = document.getElementById('marketFilter').value;
+        try {
+            allStocks = await API.stocks(mt) || [];
+            renderList();
+        } catch (e) { toast('종목 목록 조회 실패: ' + e.message, 'err'); }
+    }
+
+    function renderList() {
+        const q = document.getElementById('search').value.trim().toUpperCase();
+        const list = allStocks.filter(s =>
+            !q || s.symbol.toUpperCase().includes(q) || (s.name || '').toUpperCase().includes(q));
+        const el = document.getElementById('stockList');
+        if (!list.length) { el.innerHTML = '<div class="spinner">결과 없음</div>'; return; }
+        el.innerHTML = list.map(s => `
+            <div class="stock-row ${selected===s.symbol?'sel':''}" onclick="selectSymbol('${s.symbol}')">
+                <div><b>${s.symbol}</b><div class="muted" style="font-size:11px;">${s.name||''}</div></div>
+                <div style="text-align:right;">
+                    <div>${fmtPrice(s.currentPrice)}</div>
+                    <div class="${signClass(s.changePercent)}" style="font-size:12px;">${fmtPct(s.changePercent)}</div>
+                </div>
+            </div>`).join('');
+    }
+
+    // ---- 종목 선택 ----
+    async function selectSymbol(symbol) {
+        selected = symbol;
+        renderList();
+        history.replaceState(null, '', '?symbol=' + symbol);
+        subscribeLive(symbol);
+        await Promise.all([loadHeader(symbol), loadCharts(symbol)]);
+    }
+
+    async function loadHeader(symbol) {
+        const s = await API.stock(symbol);
+        const el = document.getElementById('detailHeader');
+        if (!s) { el.innerHTML = `<div class="muted">${symbol} 정보를 찾을 수 없습니다.</div>`; return; }
+        el.innerHTML = `
+            <div class="flex-between">
+                <div class="flex">
+                    <span style="font-size:24px;font-weight:700;">${s.symbol}</span>
+                    <span class="badge ${(s.marketType||'').toLowerCase()}">${s.marketType||'-'}</span>
+                    <span class="muted">${s.name||''} · ${s.exchange||'-'}</span>
+                </div>
+                <div style="text-align:right;">
+                    <div id="livePrice" style="font-size:26px;font-weight:700;">${fmtPrice(s.currentPrice)}</div>
+                    <div id="liveChange" class="${signClass(s.changePercent)}">${fmtPct(s.changePercent)}</div>
+                </div>
+            </div>`;
+    }
+
+    function subscribeLive(symbol) {
+        if (liveSub) liveSub.unsubscribe();
+        if (!stomp || !stomp.connected) return;
+        liveSub = stomp.subscribe('/topic/price/' + symbol, (m) => {
+            const d = JSON.parse(m.body);
+            const p = document.getElementById('livePrice');
+            const c = document.getElementById('liveChange');
+            if (p) p.textContent = fmtPrice(d.price);
+            if (c) { c.textContent = fmtPct(d.changePercent); c.className = signClass(d.changePercent); }
+        });
+    }
+
+    // ---- 차트 ----
+    function mkChart(elId, height) {
+        const el = document.getElementById(elId);
+        el.innerHTML = '';
+        return LightweightCharts.createChart(el, {
+            height: height || el.clientHeight,
+            layout: { background: { color: 'transparent' }, textColor: '#8b92a8' },
+            grid: { vertLines: { color: '#2d3346' }, horzLines: { color: '#2d3346' } },
+            timeScale: { borderColor: '#2d3346' },
+            rightPriceScale: { borderColor: '#2d3346' },
+            crosshair: { mode: 0 },
+        });
+    }
+
+    async function loadCharts(symbol) {
+        document.getElementById('chartCard').classList.remove('hidden');
+        document.getElementById('indicatorCard').classList.remove('hidden');
+        document.getElementById('chartTitle').textContent = symbol + ' 일봉 차트';
+        const days = parseInt(document.getElementById('period').value, 10);
+        const from = isoDaysAgo(days), to = todayIso();
+
+        let ohlcv, indicators;
+        try {
+            [ohlcv, indicators] = await Promise.all([
+                API.ohlcv(symbol, from, to),
+                API.indicators(symbol, from, to),
+            ]);
+        } catch (e) { toast('차트 데이터 조회 실패: ' + e.message, 'err'); return; }
+
+        Object.values(charts).forEach(c => c.remove && c.remove());
+        charts = {};
+
+        if (!ohlcv || !ohlcv.length) {
+            document.getElementById('priceChart').innerHTML = '<div class="spinner">해당 기간 일봉 데이터가 없습니다.</div>';
+        } else {
+            const price = mkChart('priceChart', 360);
+            charts.price = price;
+            const candle = price.addCandlestickSeries({
+                upColor: '#26c281', downColor: '#ff5e6c', borderVisible: false,
+                wickUpColor: '#26c281', wickDownColor: '#ff5e6c',
+            });
+            candle.setData(ohlcv.map(o => ({ time: o.date, open: +o.open, high: +o.high, low: +o.low, close: +o.close })));
+
+            const vol = price.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' });
+            vol.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+            vol.setData(ohlcv.map(o => ({ time: o.date, value: +o.volume,
+                color: (+o.close >= +o.open) ? '#26c28155' : '#ff5e6c55' })));
+
+            // 지표 오버레이
+            const ind = indicators || [];
+            const lineSeries = (color, key) => {
+                const s = price.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+                s.setData(ind.filter(i => i[key] != null).map(i => ({ time: i.tradeDate, value: +i[key] })));
+            };
+            lineSeries('#ffd43b', 'ma5');
+            lineSeries('#00d4ff', 'ma20');
+            lineSeries('#6c5ce7', 'ma60');
+            lineSeries('#888888', 'bbUpper');
+            lineSeries('#888888', 'bbLower');
+
+            // RSI
+            const rsi = mkChart('rsiChart', 180); charts.rsi = rsi;
+            const rsiLine = rsi.addLineSeries({ color: '#00d4ff', lineWidth: 2 });
+            rsiLine.setData(ind.filter(i => i.rsi14 != null).map(i => ({ time: i.tradeDate, value: +i.rsi14 })));
+            rsiLine.createPriceLine({ price: 70, color: '#ff5e6c', lineStyle: 2, lineWidth: 1 });
+            rsiLine.createPriceLine({ price: 30, color: '#26c281', lineStyle: 2, lineWidth: 1 });
+
+            // MACD
+            const macd = mkChart('macdChart', 180); charts.macd = macd;
+            macd.addLineSeries({ color: '#00d4ff', lineWidth: 2 })
+                .setData(ind.filter(i => i.macd != null).map(i => ({ time: i.tradeDate, value: +i.macd })));
+            macd.addLineSeries({ color: '#ffd43b', lineWidth: 1 })
+                .setData(ind.filter(i => i.macdSignal != null).map(i => ({ time: i.tradeDate, value: +i.macdSignal })));
+            macd.addHistogramSeries({})
+                .setData(ind.filter(i => i.macdHist != null).map(i => ({ time: i.tradeDate, value: +i.macdHist,
+                    color: (+i.macdHist >= 0) ? '#26c28199' : '#ff5e6c99' })));
+
+            price.timeScale().fitContent();
+            rsi.timeScale().fitContent();
+            macd.timeScale().fitContent();
+        }
+
+        renderIndicators(indicators);
+    }
+
+    function renderIndicators(ind) {
+        const grid = document.getElementById('indicatorGrid');
+        if (!ind || !ind.length) { grid.innerHTML = '<div class="hint">지표 데이터가 없습니다. (배치 계산 후 표시)</div>'; return; }
+        const last = ind[ind.length - 1];
+        const items = [
+            ['MA5', fmtPrice(last.ma5)], ['MA20', fmtPrice(last.ma20)], ['MA60', fmtPrice(last.ma60)],
+            ['RSI(14)', fmtNum(last.rsi14)], ['MACD', fmtNum(last.macd)], ['Signal', fmtNum(last.macdSignal)],
+            ['볼린저 상단', fmtPrice(last.bbUpper)], ['볼린저 하단', fmtPrice(last.bbLower)],
+            ['Stoch %K', fmtNum(last.stochK)], ['Stoch %D', fmtNum(last.stochD)],
+            ['ATR(14)', fmtNum(last.atr14)], ['OBV', last.obv != null ? Number(last.obv).toLocaleString() : '-'],
+        ];
+        grid.innerHTML = items.map(([k, v]) =>
+            `<div class="card stat" style="padding:14px;"><div class="label">${k}</div><div class="value" style="font-size:18px;">${v}</div></div>`).join('')
+            + `<div class="hint" style="grid-column:1/-1;">기준일: ${last.tradeDate}</div>`;
+    }
+
+    // ---- 이벤트 ----
+    document.getElementById('search').addEventListener('input', renderList);
+    document.getElementById('marketFilter').addEventListener('change', loadStocks);
+    document.getElementById('period').addEventListener('change', () => selected && loadCharts(selected));
+
+    stomp = connectStomp((c) => { if (selected) subscribeLive(selected); });
+    loadStocks().then(() => {
+        const qs = new URLSearchParams(location.search).get('symbol');
+        if (qs) selectSymbol(qs.toUpperCase());
+    });
+</script>
+</body>
+</html>

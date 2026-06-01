@@ -1,39 +1,46 @@
-package com.stockflow.realtime.batch.item;
+package com.stockflow.realtime.stock.dto;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
-@Data
+@Getter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class DailyIndicatorItem {
+public class IndicatorResponse {
     private String symbol;
     private LocalDate tradeDate;
+
+    // 이동평균
     private BigDecimal ma5;
     private BigDecimal ma20;
     private BigDecimal ma60;
+
+    // RSI
     private BigDecimal rsi14;
+
+    // MACD
     private BigDecimal macd;
     private BigDecimal macdSignal;
     private BigDecimal macdHist;
 
     // 볼린저 밴드
-    private BigDecimal bbUpper;     // 상단 밴드 (MA20 + 2σ)
-    private BigDecimal bbLower;     // 하단 밴드 (MA20 - 2σ)
+    private BigDecimal bbUpper;
+    private BigDecimal bbMiddle;
+    private BigDecimal bbLower;
 
     // 스토캐스틱
-    private BigDecimal stochK;      // %K (14일)
-    private BigDecimal stochD;      // %D (%K의 3일 SMA)
+    private BigDecimal stochK;
+    private BigDecimal stochD;
 
     // ATR
-    private BigDecimal atr14;       // 14일 ATR
+    private BigDecimal atr14;
 
     // OBV
-    private Long obv;               // On Balance Volume
+    private Long obv;
 }

@@ -50,7 +50,7 @@ public class StorageConsumer {
             boolean success = storageService.saveBatch(trades, consumerGroup);
 
             if (!success) {
-                performanceMetrics.recordFailure();
+                // 실패 메트릭은 아래 catch 블록에서 일괄 기록 (이중 집계 방지)
                 throw new RuntimeException("Batch processing failed");
             }
 

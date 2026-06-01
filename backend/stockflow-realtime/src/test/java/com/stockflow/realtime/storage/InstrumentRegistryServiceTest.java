@@ -43,7 +43,7 @@ class InstrumentRegistryServiceTest {
                 .source("BINANCE")
                 .symbol("BTCUSDT")
                 .tradeId("2")
-                .price(BigDecimal.TWO)
+                .price(new BigDecimal("2"))
                 .volume(BigDecimal.ONE)
                 .exchange("BINANCE")
                 .timestamp(ts + 1)
