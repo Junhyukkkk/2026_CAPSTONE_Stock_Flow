@@ -2,11 +2,13 @@ package com.stockflow.realtime.controller;
 
 import com.stockflow.realtime.stock.IndicatorHistoryService;
 import com.stockflow.realtime.stock.InstrumentService;
+import com.stockflow.realtime.stock.IntradayOhlcvService;
 import com.stockflow.realtime.stock.OhlcvHistoryService;
 import com.stockflow.realtime.stock.dto.IndicatorResponse;
 import com.stockflow.realtime.stock.dto.InstrumentCreateRequest;
 import com.stockflow.realtime.stock.dto.InstrumentResponse;
 import com.stockflow.realtime.stock.dto.InstrumentUpdateRequest;
+import com.stockflow.realtime.stock.dto.IntradayOhlcvResponse;
 import com.stockflow.realtime.stock.dto.OhlcvResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -36,6 +39,7 @@ public class StockController {
 
     private final InstrumentService instrumentService;
     private final OhlcvHistoryService ohlcvHistoryService;
+    private final IntradayOhlcvService intradayOhlcvService;
     private final IndicatorHistoryService indicatorHistoryService;
 
     @GetMapping
@@ -92,6 +96,21 @@ public class StockController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to
     ) {
         return ohlcvHistoryService.getOhlcv(symbol, from, to);
+    }
+
+    @GetMapping("/{symbol}/intraday")
+    @Operation(summary = "분봉 OHLCV 조회",
+            description = "원본 틱을 N분 단위로 집계한 분봉(1m/5m/15m/1h) 시가/고가/저가/종가/거래량을 조회합니다.")
+    public List<IntradayOhlcvResponse> getIntraday(
+            @PathVariable String symbol,
+            @Parameter(description = "봉 주기 (1m, 5m, 15m, 1h)")
+            @RequestParam(defaultValue = "5m") String interval,
+            @Parameter(description = "시작 시각 (ISO-8601, 예: 2026-06-05T00:00:00Z). 미지정 시 to-1일")
+            @RequestParam(required = false) Instant from,
+            @Parameter(description = "종료 시각 (ISO-8601). 미지정 시 현재")
+            @RequestParam(required = false) Instant to
+    ) {
+        return intradayOhlcvService.getIntraday(symbol, interval, from, to);
     }
 
     @GetMapping("/{symbol}/indicators")
