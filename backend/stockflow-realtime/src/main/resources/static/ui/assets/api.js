@@ -27,6 +27,9 @@ const API = {
     stock: (symbol) => API.get(`/api/stocks/${encodeURIComponent(symbol)}`),
     ohlcv: (symbol, from, to) =>
         API.get(`/api/stocks/${encodeURIComponent(symbol)}/ohlcv?from=${from}&to=${to}`),
+    intraday: (symbol, interval, from, to) =>
+        API.get(`/api/stocks/${encodeURIComponent(symbol)}/intraday?interval=${interval}`
+            + `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
     indicators: (symbol, from, to) =>
         API.get(`/api/stocks/${encodeURIComponent(symbol)}/indicators?from=${from}&to=${to}`),
     latestPrice: (symbol) => API.get(`/api/price/${encodeURIComponent(symbol)}`),

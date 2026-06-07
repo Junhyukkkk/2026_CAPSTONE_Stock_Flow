@@ -50,20 +50,32 @@
                 <div class="flex-between">
                     <h3 id="chartTitle">캔들차트</h3>
                     <div class="row" style="flex:0; gap:8px;">
+                        <select id="tf" style="width:100px;">
+                            <option value="day" selected>일봉</option>
+                            <option value="5m">5분봉</option>
+                            <option value="1m">1분봉</option>
+                        </select>
                         <select id="period" style="width:120px;">
                             <option value="90">최근 90일</option>
                             <option value="180" selected>최근 180일</option>
                             <option value="365">최근 1년</option>
                             <option value="730">최근 2년</option>
                         </select>
+                        <select id="intradayRange" style="width:120px; display:none;">
+                            <option value="6">최근 6시간</option>
+                            <option value="24" selected>최근 1일</option>
+                            <option value="72">최근 3일</option>
+                        </select>
                     </div>
                 </div>
-                <div class="pane-label">가격 + 이동평균(MA5/20/60) + 볼린저밴드 + 거래량</div>
+                <div class="pane-label" id="priceLabel">가격 + 이동평균(MA5/20/60) + 볼린저밴드 + 거래량</div>
                 <div id="priceChart" class="chart-box"></div>
-                <div class="pane-label mt-16">RSI(14)</div>
-                <div id="rsiChart" class="chart-sm"></div>
-                <div class="pane-label mt-16">MACD</div>
-                <div id="macdChart" class="chart-sm"></div>
+                <div id="subCharts">
+                    <div class="pane-label mt-16">RSI(14)</div>
+                    <div id="rsiChart" class="chart-sm"></div>
+                    <div class="pane-label mt-16">MACD</div>
+                    <div id="macdChart" class="chart-sm"></div>
+                </div>
             </div>
 
             <div class="card mt-16 hidden" id="indicatorCard">
@@ -148,22 +160,32 @@
     }
 
     // ---- 차트 ----
-    function mkChart(elId, height) {
+    function mkChart(elId, height, intraday) {
         const el = document.getElementById(elId);
         el.innerHTML = '';
         return LightweightCharts.createChart(el, {
             height: height || el.clientHeight,
             layout: { background: { color: 'transparent' }, textColor: '#8b92a8' },
             grid: { vertLines: { color: '#2d3346' }, horzLines: { color: '#2d3346' } },
-            timeScale: { borderColor: '#2d3346' },
+            timeScale: { borderColor: '#2d3346', timeVisible: !!intraday, secondsVisible: false },
             rightPriceScale: { borderColor: '#2d3346' },
             crosshair: { mode: 0 },
         });
     }
 
-    async function loadCharts(symbol) {
+    function loadCharts(symbol) {
+        const tf = document.getElementById('tf').value;
+        // 봉 주기에 따라 일봉용/분봉용 기간 셀렉터를 토글
+        document.getElementById('period').style.display = tf === 'day' ? '' : 'none';
+        document.getElementById('intradayRange').style.display = tf === 'day' ? 'none' : '';
+        return tf === 'day' ? loadDailyCharts(symbol) : loadIntradayChart(symbol, tf);
+    }
+
+    async function loadDailyCharts(symbol) {
         document.getElementById('chartCard').classList.remove('hidden');
         document.getElementById('indicatorCard').classList.remove('hidden');
+        document.getElementById('subCharts').style.display = '';
+        document.getElementById('priceLabel').textContent = '가격 + 이동평균(MA5/20/60) + 볼린저밴드 + 거래량';
         document.getElementById('chartTitle').textContent = symbol + ' 일봉 차트';
         const days = parseInt(document.getElementById('period').value, 10);
         const from = isoDaysAgo(days), to = todayIso();
@@ -232,6 +254,50 @@
         renderIndicators(indicators);
     }
 
+    async function loadIntradayChart(symbol, tf) {
+        const label = tf === '1m' ? '1분봉' : '5분봉';
+        document.getElementById('chartCard').classList.remove('hidden');
+        document.getElementById('indicatorCard').classList.add('hidden'); // 지표는 일봉 기준이라 분봉에선 숨김
+        document.getElementById('subCharts').style.display = 'none';       // RSI/MACD도 일봉 전용
+        document.getElementById('priceLabel').textContent = '가격 + 거래량';
+        document.getElementById('chartTitle').textContent = symbol + ' ' + label + ' 차트';
+
+        const hours = parseInt(document.getElementById('intradayRange').value, 10);
+        const to = new Date();
+        const from = new Date(to.getTime() - hours * 3600 * 1000);
+
+        let data;
+        try {
+            data = await API.intraday(symbol, tf, from.toISOString(), to.toISOString());
+        } catch (e) { toast('분봉 데이터 조회 실패: ' + e.message, 'err'); return; }
+
+        Object.values(charts).forEach(c => c.remove && c.remove());
+        charts = {};
+
+        if (!data || !data.length) {
+            document.getElementById('priceChart').innerHTML =
+                '<div class="spinner">해당 구간 ' + label + ' 데이터가 없습니다.</div>';
+            return;
+        }
+
+        const price = mkChart('priceChart', 360, true);
+        charts.price = price;
+        const toSec = (t) => Math.floor(new Date(t).getTime() / 1000);
+
+        const candle = price.addCandlestickSeries({
+            upColor: '#26c281', downColor: '#ff5e6c', borderVisible: false,
+            wickUpColor: '#26c281', wickDownColor: '#ff5e6c',
+        });
+        candle.setData(data.map(o => ({ time: toSec(o.time), open: +o.open, high: +o.high, low: +o.low, close: +o.close })));
+
+        const vol = price.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' });
+        vol.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+        vol.setData(data.map(o => ({ time: toSec(o.time), value: +o.volume,
+            color: (+o.close >= +o.open) ? '#26c28155' : '#ff5e6c55' })));
+
+        price.timeScale().fitContent();
+    }
+
     function renderIndicators(ind) {
         const grid = document.getElementById('indicatorGrid');
         if (!ind || !ind.length) { grid.innerHTML = '<div class="hint">지표 데이터가 없습니다. (배치 계산 후 표시)</div>'; return; }
@@ -251,7 +317,9 @@
     // ---- 이벤트 ----
     document.getElementById('search').addEventListener('input', renderList);
     document.getElementById('marketFilter').addEventListener('change', loadStocks);
+    document.getElementById('tf').addEventListener('change', () => selected && loadCharts(selected));
     document.getElementById('period').addEventListener('change', () => selected && loadCharts(selected));
+    document.getElementById('intradayRange').addEventListener('change', () => selected && loadCharts(selected));
 
     stomp = connectStomp((c) => { if (selected) subscribeLive(selected); });
     loadStocks().then(() => {
