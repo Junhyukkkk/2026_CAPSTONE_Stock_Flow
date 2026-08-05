@@ -39,6 +39,10 @@ import java.util.Map;
  *   전일 대비 종가 변동률이 ±50% 초과인 심볼을 플래그.
  *   데이터 오류 또는 극단적 시장 이벤트 식별.
  *
+ * Step 4 — 지표 적재 커버리지 검증:
+ *   당일 OHLCV는 있으나 지표(symbol_daily_indicators)가 적재되지 않은 심볼을 탐지.
+ *   지표 계산 Job이 일부 심볼을 누락했는지 조기 감지.
+ *
  * 각 Step의 결과는 batch_job_runs.meta(JSONB)에 저장된다.
  */
 @Slf4j
@@ -59,6 +63,7 @@ public class ValidationJobConfig {
                 .start(gapValidationStep())
                 .next(ohlcvSanityStep())
                 .next(extremeMovementStep())
+                .next(indicatorCoverageStep())
                 .build();
     }
 
@@ -213,6 +218,53 @@ public class ValidationJobConfig {
                     "threshold",     "50%",
                     "extremeCount",  extremes.size(),
                     "extremes",      extremes
+            ));
+
+            return RepeatStatus.FINISHED;
+        };
+    }
+
+    // ── Step 4: 지표 적재 커버리지 검증 ──────────────────────────────────────
+
+    @Bean
+    public Step indicatorCoverageStep() {
+        return new StepBuilder("indicatorCoverageStep", jobRepository)
+                .tasklet(indicatorCoverageTasklet(null), transactionManager)
+                .build();
+    }
+
+    @Bean
+    @StepScope
+    public Tasklet indicatorCoverageTasklet(
+            @Value("#{jobParameters['targetDate']}") String targetDate) {
+
+        return (contribution, chunkContext) -> {
+            // 당일 OHLCV 는 있으나 지표가 적재되지 않은 심볼
+            List<String> missingIndicators = jdbcTemplate.queryForList(
+                    """
+                    SELECT o.symbol
+                    FROM (SELECT DISTINCT symbol FROM symbol_daily_ohlcv WHERE trade_date = ?) o
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM symbol_daily_indicators i
+                        WHERE i.symbol = o.symbol AND i.trade_date = ?
+                    )
+                    ORDER BY o.symbol
+                    """,
+                    String.class,
+                    Date.valueOf(targetDate), Date.valueOf(targetDate)
+            );
+
+            if (missingIndicators.isEmpty()) {
+                log.info("Indicator coverage PASS: all OHLCV symbols have indicators for {}", targetDate);
+            } else {
+                log.warn("Indicator coverage WARN: {} symbols missing indicators on {}: {}",
+                        missingIndicators.size(), targetDate, missingIndicators);
+            }
+
+            saveValidationResult("indicator_coverage", targetDate, Map.of(
+                    "targetDate",     targetDate,
+                    "missingCount",   missingIndicators.size(),
+                    "missingSymbols", missingIndicators
             ));
 
             return RepeatStatus.FINISHED;

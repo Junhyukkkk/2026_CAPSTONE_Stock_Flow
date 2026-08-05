@@ -81,37 +81,57 @@ public class IndicatorJobConfig {
             log.info("Indicator calculation started: targetDate={} symbols={}", target, symbols.size());
 
             List<DailyIndicatorItem> batch = new ArrayList<>();
+            int computed = 0;
+            int failed = 0;
 
             for (String symbol : symbols) {
-                // 2. 심볼별 최근 HISTORY_DAYS일 OHLCV 조회 (오래된 순)
-                List<OhlcvData> ohlcvList = jdbcTemplate.query(
-                        """
-                        SELECT open, high, low, close, volume FROM symbol_daily_ohlcv
-                        WHERE symbol = ?
-                          AND trade_date <= ?
-                        ORDER BY trade_date ASC
-                        LIMIT ?
-                        """,
-                        (rs, rowNum) -> new OhlcvData(
-                                rs.getBigDecimal("open"),
-                                rs.getBigDecimal("high"),
-                                rs.getBigDecimal("low"),
-                                rs.getBigDecimal("close"),
-                                rs.getBigDecimal("volume")
-                        ),
-                        symbol, Date.valueOf(target), HISTORY_DAYS
-                );
+                try {
+                    // 2. 심볼별 "최신" HISTORY_DAYS일 OHLCV 조회 (오래된 순으로 정렬해 반환)
+                    //    - 서브쿼리에서 DESC LIMIT 으로 targetDate 이하 최근 N일을 뽑고
+                    //      바깥에서 ASC 로 뒤집는다. (예전엔 ASC LIMIT 이라 가장 오래된 N일을 가져와
+                    //      이력이 N일을 넘으면 지표가 옛 데이터로 고정 계산되던 버그)
+                    //    - DISTINCT ON (trade_date) 로 한 심볼이 여러 source 를 가져도
+                    //      날짜당 한 행만 사용해 시계열이 중복되지 않게 한다.
+                    List<OhlcvData> ohlcvList = jdbcTemplate.query(
+                            """
+                            SELECT open, high, low, close, volume
+                            FROM (
+                                SELECT DISTINCT ON (trade_date)
+                                       trade_date, open, high, low, close, volume
+                                FROM symbol_daily_ohlcv
+                                WHERE symbol = ?
+                                  AND trade_date <= ?
+                                ORDER BY trade_date DESC, source
+                                LIMIT ?
+                            ) recent
+                            ORDER BY trade_date ASC
+                            """,
+                            (rs, rowNum) -> new OhlcvData(
+                                    rs.getBigDecimal("open"),
+                                    rs.getBigDecimal("high"),
+                                    rs.getBigDecimal("low"),
+                                    rs.getBigDecimal("close"),
+                                    rs.getBigDecimal("volume")
+                            ),
+                            symbol, Date.valueOf(target), HISTORY_DAYS
+                    );
 
-                if (ohlcvList.isEmpty()) continue;
+                    if (ohlcvList.isEmpty()) continue;
 
-                // 3. 지표 계산 (OHLCV 기반)
-                DailyIndicatorItem item = indicatorService.computeWithOhlcv(symbol, target, ohlcvList);
-                batch.add(item);
+                    // 3. 지표 계산 (OHLCV 기반)
+                    DailyIndicatorItem item = indicatorService.computeWithOhlcv(symbol, target, ohlcvList);
+                    batch.add(item);
+                    computed++;
 
-                // 4. 100건마다 중간 UPSERT (메모리 절약)
-                if (batch.size() >= 100) {
-                    upsertIndicators(batch);
-                    batch.clear();
+                    // 4. 100건마다 중간 UPSERT (메모리 절약)
+                    if (batch.size() >= 100) {
+                        upsertIndicators(batch);
+                        batch.clear();
+                    }
+                } catch (Exception e) {
+                    // 한 심볼의 실패가 나머지 심볼의 지표 적재까지 막지 않도록 격리한다.
+                    failed++;
+                    log.warn("Indicator calc skipped for symbol={} on {}: {}", symbol, target, e.toString());
                 }
             }
 
@@ -120,8 +140,9 @@ public class IndicatorJobConfig {
                 upsertIndicators(batch);
             }
 
-            contribution.incrementWriteCount(symbols.size());
-            log.info("Indicator calculation finished: targetDate={} processed={}", target, symbols.size());
+            contribution.incrementWriteCount(computed);
+            log.info("Indicator calculation finished: targetDate={} symbols={} computed={} failed={}",
+                    target, symbols.size(), computed, failed);
             return RepeatStatus.FINISHED;
         };
     }

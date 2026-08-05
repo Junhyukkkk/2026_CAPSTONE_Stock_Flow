@@ -27,6 +27,9 @@ public class BatchScheduler {
     @Qualifier("dailyOhlcvJob")
     private final Job dailyOhlcvJob;
 
+    @Qualifier("prevCloseSyncJob")
+    private final Job prevCloseSyncJob;
+
     @Qualifier("dailyIndicatorJob")
     private final Job dailyIndicatorJob;
 
@@ -40,6 +43,8 @@ public class BatchScheduler {
         log.info("Daily batch starting for targetDate={}", targetDate);
 
         runJob(dailyOhlcvJob, "dailyOhlcvJob", targetDate);
+        // 일봉 집계 직후: 갓 마감된 종가를 실시간 등락률 계산용 전일 종가로 Redis에 적재
+        runJob(prevCloseSyncJob, "prevCloseSyncJob", targetDate);
         runJob(dailyIndicatorJob, "dailyIndicatorJob", targetDate);
         runJob(dataValidationJob, "dataValidationJob", targetDate);
 
