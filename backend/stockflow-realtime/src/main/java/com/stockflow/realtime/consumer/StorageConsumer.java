@@ -6,6 +6,7 @@ import com.stockflow.realtime.storage.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -17,9 +18,14 @@ import java.util.List;
  * 저장용 Kafka Consumer
  *
  * Kafka에서 메시지를 수신하고 StorageService에 위임
+ *
+ * storage.consumer.enabled=false 로 끌 수 있다.
+ * 저장 경로가 실시간 경로에 영향을 주는지(Redis 커넥션 풀/CPU 경합) 확인하는
+ * A/B 실험용이며, 기본값은 활성이다.
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(name = "storage.consumer.enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class StorageConsumer {
 

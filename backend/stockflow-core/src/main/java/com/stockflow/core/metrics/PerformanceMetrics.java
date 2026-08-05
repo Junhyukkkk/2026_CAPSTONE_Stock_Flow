@@ -133,7 +133,8 @@ public class PerformanceMetrics {
             .register(registry);
     }
 
-    private long normalizeToMillis(long timestamp) {
+    /** 거래소 timestamp가 s/ms/us/ns 어느 단위로 오든 ms로 맞춘다. */
+    public static long normalizeToMillis(long timestamp) {
         if (timestamp >= NANOS_THRESHOLD) {
             return timestamp / 1_000_000;
         } else if (timestamp >= MICROS_THRESHOLD) {

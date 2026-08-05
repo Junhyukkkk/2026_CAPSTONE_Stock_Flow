@@ -3,6 +3,8 @@ package com.stockflow.realtime.storage;
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.core.error.ErrorClassifier;
 import com.stockflow.core.error.ErrorType;
+import com.stockflow.core.metrics.PipelineStageMetrics;
+import com.stockflow.core.metrics.PipelineStageMetrics.Stage;
 import com.stockflow.core.retry.RetryPolicy;
 import com.stockflow.core.retry.RetryService;
 import com.stockflow.realtime.dlq.DLQService;
@@ -36,6 +38,7 @@ public class StorageService {
     private final RetryPolicy retryPolicy;
     private final ErrorClassifier errorClassifier;
     private final DLQService dlqService;
+    private final PipelineStageMetrics stageMetrics;
 
     @Value("${spring.kafka.topic.normalized:market.normalized}")
     private String topicName;
@@ -48,7 +51,8 @@ public class StorageService {
             RetryService retryService,
             RetryPolicy retryPolicy,
             ErrorClassifier errorClassifier,
-            DLQService dlqService) {
+            DLQService dlqService,
+            PipelineStageMetrics stageMetrics) {
         this.idempotencyService = idempotencyService;
         this.marketTickBulkWriter = marketTickBulkWriter;
         this.instrumentRegistryService = instrumentRegistryService;
@@ -57,6 +61,7 @@ public class StorageService {
         this.retryPolicy = retryPolicy;
         this.errorClassifier = errorClassifier;
         this.dlqService = dlqService;
+        this.stageMetrics = stageMetrics;
     }
 
     /**
@@ -99,8 +104,10 @@ public class StorageService {
     }
 
     private void saveInTransaction(List<NormalizedTradeDTO> trades) {
-        // 1. 멱등성 체크로 중복 필터링
+        // 1. 멱등성 체크로 중복 필터링 (메시지당 Redis 왕복 1회 — 배치 크기만큼 발생)
+        long checkStart = stageMetrics.start();
         List<NormalizedTradeDTO> newTrades = filterDuplicates(trades);
+        stageMetrics.record(Stage.STORAGE_IDEMPOTENCY_CHECK, checkStart);
 
         if (newTrades.isEmpty()) {
             log.debug("All messages already processed: size={}", trades.size());
@@ -113,17 +120,26 @@ public class StorageService {
 
         // 2. 트랜잭션 내에서 저장
         List<NormalizedTradeDTO> snapshot = new ArrayList<>(newTrades);
+        long txStart = stageMetrics.start();
         transactionTemplate.executeWithoutResult(status -> {
-            marketTickBulkWriter.insertBatch(newTrades);
-            instrumentRegistryService.registerDistinctFromTrades(newTrades);
+            stageMetrics.time(Stage.STORAGE_DB_INSERT, () -> marketTickBulkWriter.insertBatch(newTrades));
+            stageMetrics.time(Stage.STORAGE_INSTRUMENT_REGISTRY,
+                () -> instrumentRegistryService.registerDistinctFromTrades(newTrades));
             markProcessedAfterCommit(snapshot);
         });
+        // tx_total - (db_insert + instrument_registry) = 커넥션 획득 대기 + 커밋 비용
+        stageMetrics.record(Stage.STORAGE_TX_TOTAL, txStart);
     }
 
     private List<NormalizedTradeDTO> filterDuplicates(List<NormalizedTradeDTO> trades) {
-        return trades.stream()
-            .filter(t -> !idempotencyService.isAlreadyProcessed(IdempotencyChannels.STORAGE, t))
-            .toList();
+        List<Boolean> processed = idempotencyService.areAlreadyProcessed(IdempotencyChannels.STORAGE, trades);
+        List<NormalizedTradeDTO> newTrades = new ArrayList<>(trades.size());
+        for (int i = 0; i < trades.size(); i++) {
+            if (!processed.get(i)) {
+                newTrades.add(trades.get(i));
+            }
+        }
+        return newTrades;
     }
 
     private void markProcessedAfterCommit(List<NormalizedTradeDTO> trades) {
@@ -131,11 +147,17 @@ public class StorageService {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    idempotencyService.markBatchAsProcessed(IdempotencyChannels.STORAGE, trades);
+                    markBatch(trades);
                 }
             });
         } else {
-            idempotencyService.markBatchAsProcessed(IdempotencyChannels.STORAGE, trades);
+            markBatch(trades);
         }
+    }
+
+    /** 메시지당 Redis SET 1회 — 배치 크기만큼 왕복이 발생한다. */
+    private void markBatch(List<NormalizedTradeDTO> trades) {
+        stageMetrics.time(Stage.STORAGE_IDEMPOTENCY_MARK,
+            () -> idempotencyService.markBatchAsProcessed(IdempotencyChannels.STORAGE, trades));
     }
 }
