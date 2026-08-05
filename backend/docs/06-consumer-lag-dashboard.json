@@ -1,0 +1,99 @@
+{
+  "uid": "stockflow-consumer-lag",
+  "title": "StockFlow - Consumer Lag & 유실 위험",
+  "tags": ["stockflow", "kafka", "lag", "reliability"],
+  "timezone": "Asia/Seoul",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "밀린 양·유실 위험 개요",
+      "type": "text",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "**stockflow_consumer_lag** = 밀린 메시지 수 (처리가 도착을 못 따라간 양). 계속 우상향이면 위험.\n\n**stockflow_consumer_retention_margin** = 커밋 위치가 Kafka 삭제 경계에서 떨어진 거리. **0에 가까워지면 데이터 유실 임박.**\n\n경보 규칙: `infra/prometheus/rules/consumer_lag.yml` — Prometheus `/alerts` 에서 상태 확인."
+      }
+    },
+    {
+      "title": "총 밀린 양 (그룹별)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 3 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(stockflow_consumer_lag) by (group)", "legendFormat": "{{group}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50000 },
+              { "color": "red", "value": 200000 }
+            ]
+          }
+        }
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "calcs": ["last", "max"] } }
+    },
+    {
+      "title": "유실 위험 여유분 (삭제 경계까지 남은 offset, 낮을수록 위험)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 3 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "min(stockflow_consumer_retention_margin) by (group)", "legendFormat": "{{group}} (최소)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "green", "value": 10000 }
+            ]
+          }
+        }
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "calcs": ["last", "min"] } }
+    },
+    {
+      "title": "밀린 양 증가 추세 (>0 이면 처리<도착)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 11 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "deriv(sum(stockflow_consumer_lag) by (group)[15m:1m])", "legendFormat": "{{group}} 증가율/s" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.001 } ] }
+        }
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "list", "calcs": ["last"] } }
+    },
+    {
+      "title": "파티션별 밀린 양",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 11 },
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "stockflow_consumer_lag", "legendFormat": "{{group}} p{{partition}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 1 } }
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "calcs": ["last", "max"] } }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

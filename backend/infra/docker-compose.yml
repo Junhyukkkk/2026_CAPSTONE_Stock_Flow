@@ -72,6 +72,7 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/rules:/etc/prometheus/rules
       - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -98,6 +99,7 @@ services:
       - ../docs/03-redis-hikari-dashboard.json:/var/lib/grafana/dashboards/03-redis-hikari-dashboard.json
       - ../docs/04-http-logs-dashboard.json:/var/lib/grafana/dashboards/04-http-logs-dashboard.json
       - ../docs/05-app-custom-dashboard.json:/var/lib/grafana/dashboards/05-app-custom-dashboard.json
+      - ../docs/06-consumer-lag-dashboard.json:/var/lib/grafana/dashboards/06-consumer-lag-dashboard.json
     depends_on:
       - prometheus
 

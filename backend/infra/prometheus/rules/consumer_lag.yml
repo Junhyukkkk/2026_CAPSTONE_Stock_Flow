@@ -1,0 +1,32 @@
+groups:
+  - name: stockflow-consumer-lag
+    rules:
+      # 밀린 양이 임계치 이상으로 유지 — 처리가 도착을 못 따라가기 시작
+      - alert: ConsumerLagHigh
+        expr: sum(stockflow_consumer_lag) by (group) > 50000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Consumer 적체 높음 (group={{ $labels.group }})"
+          description: "5분 이상 밀린 메시지가 5만 건을 초과했습니다. 처리 용량 점검이 필요합니다."
+
+      # 밀린 양이 계속 우상향 — ρ>1 지속. 방치 시 retention 넘겨 유실로 이어짐
+      - alert: ConsumerLagGrowing
+        expr: deriv(sum(stockflow_consumer_lag) by (group)[15m:1m]) > 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Consumer 적체 지속 증가 (group={{ $labels.group }})"
+          description: "15분간 밀린 양이 계속 증가 중입니다 (처리<도착). 이대로면 보관기간을 넘겨 데이터가 유실됩니다."
+
+      # 커밋 위치가 삭제 경계에 근접 — 다음 retention 삭제 때 미처리 데이터 유실 임박
+      - alert: ConsumerNearRetentionCliff
+        expr: min(stockflow_consumer_retention_margin) by (group) < 1000
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "데이터 유실 임박 (group={{ $labels.group }})"
+          description: "커밋 위치가 Kafka 삭제 경계까지 1000건 이내입니다. 곧 미처리 메시지가 삭제(유실)될 수 있습니다."
