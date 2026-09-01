@@ -12,8 +12,11 @@ groups:
           description: "5분 이상 밀린 메시지가 5만 건을 초과했습니다. 처리 용량 점검이 필요합니다."
 
       # 밀린 양이 계속 우상향 — ρ>1 지속. 방치 시 retention 넘겨 유실로 이어짐
+      # (적체가 이미 1만 건을 넘긴 상태에서 계속 증가할 때만. 0 근처 노이즈에 오탐 방지)
       - alert: ConsumerLagGrowing
-        expr: deriv(sum(stockflow_consumer_lag) by (group)[15m:1m]) > 0
+        expr: |
+          deriv(sum(stockflow_consumer_lag) by (group)[15m:1m]) > 0
+          and sum(stockflow_consumer_lag) by (group) > 10000
         for: 15m
         labels:
           severity: critical
@@ -22,11 +25,20 @@ groups:
           description: "15분간 밀린 양이 계속 증가 중입니다 (처리<도착). 이대로면 보관기간을 넘겨 데이터가 유실됩니다."
 
       # 커밋 위치가 삭제 경계에 근접 — 다음 retention 삭제 때 미처리 데이터 유실 임박
+      #
+      # 유실은 "아직 처리 안 한 메시지"가 삭제될 때만 발생한다. 따라서 해당 파티션에
+      # 실제 적체(lag>100)가 있으면서 동시에 삭제 경계까지 1000건 이내일 때만 발화한다.
+      # (lag≈0 이면 이미 다 읽었으므로 삭제돼도 유실 아님 — 콜드 스타트/저트래픽
+      #  파티션에서 margin 이 작게 나오는 것에 오탐하지 않도록.)
       - alert: ConsumerNearRetentionCliff
-        expr: min(stockflow_consumer_retention_margin) by (group) < 1000
-        for: 1m
+        expr: |
+          min by (group) (
+            stockflow_consumer_retention_margin
+            and on(group, partition) (stockflow_consumer_lag > 100)
+          ) < 1000
+        for: 2m
         labels:
           severity: critical
         annotations:
           summary: "데이터 유실 임박 (group={{ $labels.group }})"
-          description: "커밋 위치가 Kafka 삭제 경계까지 1000건 이내입니다. 곧 미처리 메시지가 삭제(유실)될 수 있습니다."
+          description: "적체된 파티션의 커밋 위치가 Kafka 삭제 경계까지 1000건 이내입니다. 곧 미처리 메시지가 삭제(유실)될 수 있습니다."
