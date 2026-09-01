@@ -1,0 +1,92 @@
+{
+  "uid": "stockflow-logs",
+  "title": "StockFlow - 로그 수집 (Loki)",
+  "tags": ["stockflow", "logs", "loki"],
+  "timezone": "Asia/Seoul",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "app",
+        "type": "custom",
+        "label": "앱 로그 스트림",
+        "query": "stockflow-realtime",
+        "current": { "text": "stockflow-realtime", "value": "stockflow-realtime" },
+        "options": [
+          { "text": "stockflow-realtime", "value": "stockflow-realtime", "selected": true }
+        ]
+      },
+      {
+        "name": "search",
+        "type": "textbox",
+        "label": "본문 검색어 (선택)",
+        "query": "",
+        "current": { "text": "", "value": "" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "안내",
+      "type": "text",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "Spring 앱 로그는 **loki-logback-appender** 가 Loki 로 직접 push (`{app=\"stockflow-realtime\"}`), 나머지 컨테이너 로그는 **Promtail** 이 수집 (`{source=\"docker\"}`).  \nExplore 에서 자유 질의: `{app=\"stockflow-realtime\"} |= \"error\"` / `{source=\"docker\", service=\"kafka\"}`"
+      }
+    },
+    {
+      "title": "레벨별 로그량 (앱)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 3 },
+      "datasource": "Loki",
+      "targets": [
+        { "expr": "sum by (level) (count_over_time({app=\"$app\"} [1m]))", "legendFormat": "{{level}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "ERROR" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] },
+          { "matcher": { "id": "byName", "options": "WARN" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "table", "calcs": ["sum"] } }
+    },
+    {
+      "title": "ERROR / WARN 스트림 (앱)",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 3 },
+      "datasource": "Loki",
+      "targets": [
+        { "expr": "{app=\"$app\", level=~\"ERROR|WARN\"}" }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
+    },
+    {
+      "title": "전체 앱 로그 ($search 필터)",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 11 },
+      "datasource": "Loki",
+      "targets": [
+        { "expr": "{app=\"$app\"} |~ \"(?i)$search\"" }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
+    },
+    {
+      "title": "인프라 컨테이너 로그 (Promtail: kafka/redis/timescaledb/collector 등)",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 21 },
+      "datasource": "Loki",
+      "targets": [
+        { "expr": "{source=\"docker\"} |~ \"(?i)$search\"" }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

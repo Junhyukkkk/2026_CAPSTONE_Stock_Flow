@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  로깅 구성
+  - CONSOLE: 항상 사람이 읽기 좋은 형태로 출력 (Spring Boot 기본 패턴)
+  - LOKI:    'loki' 프로파일에서만 root 에 부착. logback → Loki HTTP push.
+             Docker(infra/docker-compose.yml)에서 SPRING_PROFILES_ACTIVE=loki 로 켜진다.
+             LOKI_URL 로 엔드포인트를 바꿀 수 있다(기본 http://loki:3100).
+  - Sentry(SentryAppender)는 sentry-spring-boot-starter 가 런타임에 자동으로 root 에 붙인다.
+    (application.yml 의 sentry.logging.minimum-event-level 로 레벨 제어)
+  테스트에서는 src/test/resources/logback-test.xml 이 우선하여 CONSOLE 만 쓴다.
+-->
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="stockflow-realtime"/>
+
+    <springProfile name="loki">
+        <appender name="LOKI" class="com.github.loki4j.logback.Loki4jAppender">
+            <!-- 콘솔은 DEBUG 까지 찍되, 수집소(Loki)로는 기본 INFO 이상만 보낸다.
+                 LOKI_MIN_LEVEL=DEBUG 로 낮추면 전량 수집 가능. -->
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <level>${LOKI_MIN_LEVEL:-INFO}</level>
+            </filter>
+            <http>
+                <url>${LOKI_URL:-http://loki:3100/loki/api/v1/push}</url>
+            </http>
+            <format>
+                <label>
+                    <pattern>app=${appName},host=${HOSTNAME},level=%level</pattern>
+                </label>
+                <message>
+                    <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+                </message>
+                <sortByTime>true</sortByTime>
+            </format>
+            <batchMaxItems>500</batchMaxItems>
+            <batchTimeoutMs>5000</batchTimeoutMs>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="LOKI"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!loki">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>

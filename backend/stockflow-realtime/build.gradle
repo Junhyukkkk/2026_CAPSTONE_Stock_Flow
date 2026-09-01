@@ -40,6 +40,15 @@ dependencies {
     // Micrometer (메트릭 수집)
     implementation 'io.micrometer:micrometer-registry-prometheus'
 
+    // Sentry (에러 트래킹 - ERROR 로그를 이벤트로 전송, GlitchTip 호환)
+    // SENTRY_DSN 이 비어 있으면 자동 비활성(no-op) 되므로 로컬/테스트 환경에서도 안전
+    implementation 'io.sentry:sentry-spring-boot-starter-jakarta:7.18.1'
+    implementation 'io.sentry:sentry-logback:7.18.1'
+
+    // Loki 로그 수집 (logback → Loki HTTP push, Grafana 에서 조회)
+    // loki 프로파일에서만 root 에 부착됨 (logback-spring.xml 참고)
+    implementation 'com.github.loki4j:loki-logback-appender:1.5.2'
+
     // Test
     testImplementation 'org.springframework.kafka:spring-kafka-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'

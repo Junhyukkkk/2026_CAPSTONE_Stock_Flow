@@ -1,4 +1,5 @@
 version: '3.8'
+
 services:
   # TimescaleDB
   timescaledb:
@@ -19,6 +20,9 @@ services:
     container_name: stockflow-zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -34,6 +38,29 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_LOG_RETENTION_HOURS: 4
       KAFKA_NUM_PARTITIONS: 6
+    volumes:
+      # 명시적 named volume — docker compose down 해도 토픽·오프셋 유지 (down -v 로만 삭제)
+      - kafka-data:/var/lib/kafka/data
+
+  # Kafka 토픽 생성 (1회성)
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: stockflow-kafka-setup
+    depends_on:
+      - kafka
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "kafka 준비 대기..."
+        for i in $$(seq 1 30); do
+          kafka-topics --bootstrap-server kafka:9092 --list >/dev/null 2>&1 && break
+          sleep 2
+        done
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic market.normalized --partitions 12 --replication-factor 1 --config retention.ms=14400000
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic market.retry      --partitions 6  --replication-factor 1 --config retention.ms=14400000
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic market.dlq        --partitions 3  --replication-factor 1 --config retention.ms=604800000
+        echo "토픽 생성 완료"; kafka-topics --bootstrap-server kafka:9092 --list
+    restart: "no"
 
   # Redis
   redis:
@@ -81,12 +108,35 @@ services:
     depends_on:
       - stockflow-realtime
 
+  # Loki - 로그 수집 저장소
+  loki:
+    image: grafana/loki:3.1.1
+    container_name: stockflow-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+
+  # Promtail - 컨테이너 로그를 Loki 로 전달
+  promtail:
+    image: grafana/promtail:3.1.1
+    container_name: stockflow-promtail
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
   # Grafana
   grafana:
     image: grafana/grafana:latest
     container_name: stockflow-grafana
     ports:
-      - "3000:3000"
+      # 호스트 3000 이 이미 쓰이는 경우가 많아 3001 로 노출 (GRAFANA_PORT 로 변경 가능)
+      - "${GRAFANA_PORT:-3001}:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
@@ -100,8 +150,10 @@ services:
       - ../docs/04-http-logs-dashboard.json:/var/lib/grafana/dashboards/04-http-logs-dashboard.json
       - ../docs/05-app-custom-dashboard.json:/var/lib/grafana/dashboards/05-app-custom-dashboard.json
       - ../docs/06-consumer-lag-dashboard.json:/var/lib/grafana/dashboards/06-consumer-lag-dashboard.json
+      - ../docs/07-logs-dashboard.json:/var/lib/grafana/dashboards/07-logs-dashboard.json
     depends_on:
       - prometheus
+      - loki
 
   # Spring Boot Consumer
   stockflow-realtime:
@@ -112,8 +164,8 @@ services:
     ports:
       - "8081:8081"
     environment:
-      # Spring Profile
-      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-}
+      # Spring Profile (loki: logback → Loki appender 활성)
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-loki}
       # Kafka
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_CONSUMER_GROUP_REALTIME=realtime-group
@@ -130,6 +182,13 @@ services:
       - DB_NAME=stockflow
       - DB_USERNAME=postgres
       - DB_PASSWORD=postgres
+      # 로그 수집 (Loki) — 콘솔은 DEBUG, Loki 로는 LOKI_MIN_LEVEL(기본 INFO) 이상만 전송
+      - LOKI_URL=${LOKI_URL:-http://loki:3100/loki/api/v1/push}
+      - LOKI_MIN_LEVEL=${LOKI_MIN_LEVEL:-INFO}
+      # 에러 트래킹 (Sentry / GlitchTip) - DSN 비어 있으면 자동 비활성
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-docker-local}
+      - SENTRY_RELEASE=${SENTRY_RELEASE:-}
       # Retry Policy
       - RETRY_MODE=${RETRY_MODE:-sync}
       - RETRY_MAX_RETRIES=${RETRY_MAX_RETRIES:-3}
@@ -140,9 +199,14 @@ services:
       - RETRY_USE_JITTER=${RETRY_USE_JITTER:-true}
       - RETRY_JITTER_RATIO=${RETRY_JITTER_RATIO:-0.2}
     depends_on:
-      - kafka
-      - redis
-      - timescaledb
+      kafka-setup:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      timescaledb:
+        condition: service_started
+      loki:
+        condition: service_started
     networks:
       - default
     restart: unless-stopped
@@ -153,7 +217,114 @@ services:
       retries: 3
       start_period: 60s
 
+  # ---- 실시간 데이터 수집기 (Binance 암호화폐, 키 불필요, 24시간) ----
+  binance-collector:
+    build:
+      context: ../../collectors
+      dockerfile: Dockerfile
+    container_name: stockflow-binance-collector
+    command: python binance_producer.py
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - BINANCE_TOPIC_NAME=market.normalized
+      - BINANCE_TOP_SYMBOLS_LIMIT=${BINANCE_TOP_SYMBOLS_LIMIT:-50}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      kafka-setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # ---- Alpaca 미국 주식 수집기 (API 키 필요, 장중에만 데이터) ----
+  # 실행: docker compose --profile alpaca up -d
+  alpaca-collector:
+    build:
+      context: ../../collectors
+      dockerfile: Dockerfile
+    container_name: stockflow-alpaca-collector
+    command: python alpaca_producer.py
+    profiles: ["alpaca"]
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - ALPACA_API_KEY=${ALPACA_API_KEY:-}
+      - ALPACA_API_SECRET=${ALPACA_API_SECRET:-}
+      - ALPACA_WEBSOCKET_URL=${ALPACA_WEBSOCKET_URL:-wss://stream.data.alpaca.markets/v2/iex}
+      - ALPACA_TOPIC_NAME=market.normalized
+      - ALPACA_SUBSCRIBE_ALL_STOCKS=${ALPACA_SUBSCRIBE_ALL_STOCKS:-true}
+      - ALPACA_SUBSCRIBE_SYMBOLS=${ALPACA_SUBSCRIBE_SYMBOLS:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - kafka
+    restart: unless-stopped
+
+  # ---- Sentry 호환 에러 트래킹 (GlitchTip) ----
+  # 실행: docker compose --profile sentry up -d
+  # 이후 http://localhost:8000 에서 계정/프로젝트 생성 → DSN 을 .env 의 SENTRY_DSN 에 넣고
+  #      docker compose up -d stockflow-realtime 로 앱만 재기동
+  glitchtip-postgres:
+    image: postgres:16-alpine
+    container_name: stockflow-glitchtip-postgres
+    profiles: ["sentry"]
+    environment:
+      POSTGRES_DB: glitchtip
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - glitchtip-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  glitchtip-web:
+    image: glitchtip/glitchtip:v4.1.1
+    container_name: stockflow-glitchtip
+    profiles: ["sentry"]
+    depends_on:
+      glitchtip-postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8080"
+    environment: &glitchtip-env
+      DATABASE_URL: postgres://postgres:postgres@glitchtip-postgres:5432/glitchtip
+      SECRET_KEY: ${GLITCHTIP_SECRET_KEY:-stockflow-local-dev-secret-key-change-me}
+      PORT: "8080"
+      EMAIL_URL: consolemail://
+      GLITCHTIP_DOMAIN: http://localhost:8000
+      DEFAULT_FROM_EMAIL: stockflow@example.com
+      REDIS_URL: redis://redis:6379/2
+      ENABLE_OPEN_USER_REGISTRATION: "true"
+      CELERY_WORKER_AUTOSCALE: "1,3"
+    restart: unless-stopped
+
+  glitchtip-worker:
+    image: glitchtip/glitchtip:v4.1.1
+    container_name: stockflow-glitchtip-worker
+    profiles: ["sentry"]
+    command: ./bin/run-celery-with-beat.sh
+    depends_on:
+      glitchtip-postgres:
+        condition: service_healthy
+    environment: *glitchtip-env
+    restart: unless-stopped
+
+  glitchtip-migrate:
+    image: glitchtip/glitchtip:v4.1.1
+    container_name: stockflow-glitchtip-migrate
+    profiles: ["sentry"]
+    command: ./bin/run-migrate.sh
+    depends_on:
+      glitchtip-postgres:
+        condition: service_healthy
+    environment: *glitchtip-env
+    restart: "no"
+
 volumes:
-  timescale-data:
-  prometheus-data:
-  grafana-data:
+  timescale-data:      # 원본 틱·일봉·지표·백테스트·배치이력 (진짜 데이터)
+  kafka-data:          # Kafka 토픽 로그·컨슈머 오프셋
+  zookeeper-data:
+  zookeeper-log:
+  prometheus-data:     # 메트릭 (7d 보관)
+  grafana-data:        # Grafana 내부 상태
+  loki-data:           # 수집된 로그 (72h 보관)
+  glitchtip-pg-data:   # GlitchTip 계정·프로젝트·이슈

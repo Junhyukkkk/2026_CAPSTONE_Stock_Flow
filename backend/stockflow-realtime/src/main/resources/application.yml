@@ -105,6 +105,22 @@ logging:
     org.springframework.kafka: INFO
     org.springframework.data.redis: INFO
 
+# Sentry / GlitchTip (에러 트래킹)
+# SENTRY_DSN 이 비어 있으면 SDK 가 자동 비활성(no-op) 되므로 로컬/테스트에서도 안전하다.
+# GlitchTip UI(http://localhost:8000)에서 프로젝트를 만든 뒤 DSN 을 .env 에 넣으면 활성화된다.
+sentry:
+  dsn: ${SENTRY_DSN:}
+  environment: ${SENTRY_ENVIRONMENT:local}
+  release: ${SENTRY_RELEASE:}
+  send-default-pii: false
+  # WARN 이상은 breadcrumb, ERROR 이상은 이벤트로 전송
+  logging:
+    enabled: true
+    minimum-breadcrumb-level: info
+    minimum-event-level: error
+  in-app-includes:
+    - com.stockflow
+
 # Retry Policy 설정 (RetryPolicyConfig에서 참조)
 retry:
   mode: ${RETRY_MODE:sync}
