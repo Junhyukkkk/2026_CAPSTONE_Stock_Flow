@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockFlow · 실시간 시세</title>
+    <link rel="stylesheet" href="assets/app.css">
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        .live-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .live-toolbar .grow { flex: 1; min-width: 180px; }
+        .live-toolbar select, .live-toolbar input { width: auto; }
+
+        .metric-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        @media (max-width: 780px) { .metric-row { grid-template-columns: repeat(2, 1fr); } }
+        .metric { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+        .metric .k { font-size: 11px; color: var(--text-dim); }
+        .metric .v { font-size: 20px; font-weight: 700; margin-top: 2px; }
+
+        .price-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+        .pc {
+            background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+            padding: 14px; position: relative; transition: background .18s, border-color .18s;
+        }
+        .pc.stale { opacity: .5; }
+        .pc.flash-up { animation: fu .6s ease-out; }
+        .pc.flash-down { animation: fd .6s ease-out; }
+        @keyframes fu { 0% { background: #14311f; border-color: var(--up); } 100% {} }
+        @keyframes fd { 0% { background: #3a1620; border-color: var(--down); } 100% {} }
+        .pc .top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+        .pc .sym { font-weight: 700; font-size: 15px; }
+        .pc .rm { cursor: pointer; color: var(--text-dim); font-size: 13px; line-height: 1; }
+        .pc .rm:hover { color: var(--down); }
+        .pc .price { font-size: 24px; font-weight: 700; margin: 8px 0 2px; font-variant-numeric: tabular-nums; }
+        .pc .chg { font-size: 13px; font-variant-numeric: tabular-nums; }
+        .pc .spark { display: block; width: 100%; height: 40px; margin: 8px 0 6px; }
+        .pc .meta { font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; gap: 6px; }
+
+        table.live td, table.live th { padding: 8px 10px; }
+        table.live .spark { width: 120px; height: 28px; vertical-align: middle; }
+        .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+        .seg button { background: var(--bg-2); color: var(--text-dim); border: 0; padding: 7px 12px; font-size: 12px; }
+        .seg button.on { background: var(--accent); color: #07111a; font-weight: 700; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="flex-between">
+        <div>
+            <div class="page-title">실시간 시세</div>
+            <div class="page-sub">Kafka → Redis Pub/Sub → WebSocket(STOMP /topic/price/*) 실시간 스트림</div>
+        </div>
+        <div class="seg" id="viewSeg">
+            <button data-v="card" class="on">카드</button>
+            <button data-v="table">표</button>
+        </div>
+    </div>
+
+    <div class="metric-row mt-16">
+        <div class="metric"><div class="k">구독 종목</div><div class="v" id="mSubs">0</div></div>
+        <div class="metric"><div class="k">수신 틱 / 초</div><div class="v" id="mRate">0</div></div>
+        <div class="metric"><div class="k">평균 화면 지연 (E2E)</div><div class="v" id="mLat">-</div></div>
+        <div class="metric"><div class="k">서버 수신 중 종목</div><div class="v" id="mActive">-</div></div>
+    </div>
+
+    <div class="card mt-16">
+        <div class="live-toolbar">
+            <input class="grow" list="symbolOptions" id="symInput" placeholder="심볼 추가 (예: BTCUSDT, ETHUSDT) — Enter">
+            <datalist id="symbolOptions"></datalist>
+            <button class="btn btn-sm" onclick="addFromInput()">추가</button>
+            <select id="sortSel" class="btn-sm" title="정렬">
+                <option value="chg-desc">등락률 높은순</option>
+                <option value="chg-asc">등락률 낮은순</option>
+                <option value="sym">심볼순</option>
+                <option value="upd">최근 갱신순</option>
+            </select>
+            <button class="btn-ghost btn-sm" onclick="seedFromActive()">서버 수신 종목 불러오기</button>
+            <button class="btn-ghost btn-sm" onclick="seedFromOverview()">등락 상위 불러오기</button>
+            <button class="btn-danger btn-sm" onclick="clearAll()">전체 해제</button>
+        </div>
+        <div id="watchTags" class="flex flex-wrap mt-16"></div>
+    </div>
+
+    <div id="emptyHint" class="card mt-16 hint hidden">
+        구독 중인 종목이 없습니다. 위에서 심볼을 추가하거나 "서버 수신 종목 불러오기"를 누르세요.
+        서버가 해당 종목의 시세를 수신 중이어야 값이 갱신됩니다.
+    </div>
+
+    <div id="cardView" class="price-grid mt-16"></div>
+
+    <div id="tableView" class="card mt-16 hidden" style="overflow-x:auto;">
+        <table class="live">
+            <thead><tr>
+                <th>종목</th><th>현재가</th><th>등락</th><th>등락률</th>
+                <th>추이</th><th>거래량</th><th>거래소</th><th>갱신</th><th></th>
+            </tr></thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<script src="assets/api.js"></script>
+<script>
+    renderNav('live.html');
+
+    const LS_WATCH = 'stockflow.live.watchlist';
+    const LS_VIEW = 'stockflow.live.view';
+    const MAX_SUBS = 48;
+    const STALE_MS = 12000;
+    const HIST_LEN = 90;
+
+    let stomp = null;
+    const subs = {};        // symbol -> stomp subscription
+    const state = {};       // symbol -> { snap, hist:[{t,p}], lastMs, flash }
+    let view = 'card';
+    let sortMode = 'chg-desc';
+    const rxTimes = [];     // 수신 시각들 (rate 계산)
+    const latSamples = [];  // 최근 E2E 지연 표본
+
+    // ---------- 저장/복원 ----------
+    function loadWatch() {
+        try { return JSON.parse(localStorage.getItem(LS_WATCH)) || []; } catch (e) { return []; }
+    }
+    function saveWatch() {
+        try { localStorage.setItem(LS_WATCH, JSON.stringify(Object.keys(subs))); } catch (e) {}
+    }
+
+    // ---------- 구독 관리 ----------
+    function subscribe(symbol) {
+        symbol = (symbol || '').trim().toUpperCase();
+        if (!symbol || subs[symbol]) return;
+        if (Object.keys(subs).length >= MAX_SUBS) { toast(`최대 ${MAX_SUBS}개까지 구독할 수 있습니다`, 'err'); return; }
+
+        state[symbol] = state[symbol] || { snap: { symbol }, hist: [], lastMs: 0 };
+
+        if (stomp && stomp.connected) {
+            subs[symbol] = stomp.subscribe('/topic/price/' + symbol, (m) => onTick(symbol, JSON.parse(m.body)));
+        } else {
+            subs[symbol] = null; // 연결되면 resubscribeAll 에서 채움
+        }
+        // 초기값은 REST 로 한번 시드
+        API.latestPrice(symbol).then(p => { if (p) onTick(symbol, p, true); }).catch(() => {});
+        renderTags(); saveWatch(); scheduleRender();
+    }
+
+    function unsubscribe(symbol) {
+        if (subs[symbol]) subs[symbol].unsubscribe();
+        delete subs[symbol];
+        delete state[symbol];
+        renderTags(); saveWatch(); scheduleRender();
+    }
+
+    function clearAll() {
+        Object.keys(subs).forEach(s => subs[s] && subs[s].unsubscribe());
+        Object.keys(subs).forEach(s => delete subs[s]);
+        Object.keys(state).forEach(s => delete state[s]);
+        renderTags(); saveWatch(); scheduleRender();
+    }
+
+    function resubscribeAll() {
+        Object.keys(subs).forEach(symbol => {
+            if (subs[symbol]) return;
+            subs[symbol] = stomp.subscribe('/topic/price/' + symbol, (m) => onTick(symbol, JSON.parse(m.body)));
+        });
+    }
+
+    // ---------- 틱 처리 ----------
+    function onTick(symbol, data, isSeed) {
+        const st = state[symbol];
+        if (!st) return;
+        const prevPrice = st.snap && st.snap.price != null ? Number(st.snap.price) : null;
+        st.snap = data;
+        st.lastMs = Date.now();
+
+        const price = Number(data.price);
+        if (!Number.isNaN(price)) {
+            st.hist.push({ t: st.lastMs, p: price });
+            if (st.hist.length > HIST_LEN) st.hist.shift();
+            if (prevPrice != null && price !== prevPrice) st.flash = price > prevPrice ? 'up' : 'down';
+        }
+
+        if (!isSeed) {
+            rxTimes.push(st.lastMs);
+            const ts = Number(data.timestamp);
+            if (ts > 0) {
+                const lat = Date.now() - ts;
+                if (lat >= 0 && lat < 120000) { latSamples.push(lat); if (latSamples.length > 60) latSamples.shift(); }
+            }
+        }
+        scheduleRender();
+    }
+
+    // ---------- 렌더 ----------
+    let renderQueued = false;
+    function scheduleRender() {
+        if (renderQueued) return;
+        renderQueued = true;
+        requestAnimationFrame(() => { renderQueued = false; render(); });
+    }
+
+    function sortedSymbols() {
+        const arr = Object.keys(state);
+        const pct = s => { const v = Number(state[s].snap && state[s].snap.changePercent); return Number.isNaN(v) ? -Infinity : v; };
+        if (sortMode === 'chg-desc') arr.sort((a, b) => pct(b) - pct(a));
+        else if (sortMode === 'chg-asc') arr.sort((a, b) => pct(a) - pct(b));
+        else if (sortMode === 'sym') arr.sort();
+        else if (sortMode === 'upd') arr.sort((a, b) => (state[b].lastMs || 0) - (state[a].lastMs || 0));
+        return arr;
+    }
+
+    function sparkSvg(hist, w, h) {
+        if (!hist || hist.length < 2) return `<svg class="spark" viewBox="0 0 ${w} ${h}"></svg>`;
+        const ps = hist.map(x => x.p);
+        const min = Math.min(...ps), max = Math.max(...ps);
+        const span = (max - min) || 1;
+        const stepX = w / (hist.length - 1);
+        const pts = hist.map((x, i) => `${(i * stepX).toFixed(1)},${(h - ((x.p - min) / span) * (h - 4) - 2).toFixed(1)}`).join(' ');
+        const up = ps[ps.length - 1] >= ps[0];
+        const col = up ? 'var(--up)' : 'var(--down)';
+        return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+            <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5"/></svg>`;
+    }
+
+    function ageText(ms) {
+        if (!ms) return '대기';
+        const s = Math.round((Date.now() - ms) / 1000);
+        if (s < 1) return '방금';
+        if (s < 60) return s + '초 전';
+        return Math.floor(s / 60) + '분 전';
+    }
+
+    function render() {
+        const syms = sortedSymbols();
+        document.getElementById('mSubs').textContent = syms.length;
+        document.getElementById('emptyHint').classList.toggle('hidden', syms.length > 0);
+
+        const cardView = document.getElementById('cardView');
+        const tableBody = document.getElementById('tableBody');
+        cardView.classList.toggle('hidden', view !== 'card');
+        document.getElementById('tableView').classList.toggle('hidden', view !== 'table');
+
+        if (view === 'card') {
+            cardView.innerHTML = syms.map(s => {
+                const st = state[s], d = st.snap || {};
+                const stale = st.lastMs && (Date.now() - st.lastMs > STALE_MS);
+                const sc = signClass(d.changePercent);
+                const flash = st.flash ? ` flash-${st.flash}` : '';
+                st.flash = null;
+                return `<div class="pc${flash}${stale ? ' stale' : ''}">
+                    <div class="top">
+                        <span class="sym">${s} <span class="badge ${(d.marketType || '').toLowerCase()}">${d.marketType || '-'}</span></span>
+                        <span class="rm" title="구독 해제" onclick="unsubscribe('${s}')">✕</span>
+                    </div>
+                    <div class="price">${fmtPrice(d.price)}</div>
+                    <div class="chg ${sc}">${d.change != null ? (Number(d.change) > 0 ? '+' : '') + fmtNum(d.change) : '-'} (${fmtPct(d.changePercent)})</div>
+                    ${sparkSvg(st.hist, 200, 40)}
+                    <div class="meta"><span>${d.exchange || '-'}</span><span>${ageText(st.lastMs)}</span></div>
+                </div>`;
+            }).join('');
+        } else {
+            tableBody.innerHTML = syms.map(s => {
+                const st = state[s], d = st.snap || {};
+                const stale = st.lastMs && (Date.now() - st.lastMs > STALE_MS);
+                const sc = signClass(d.changePercent);
+                return `<tr class="${stale ? 'muted' : ''}">
+                    <td><b>${s}</b> <span class="badge ${(d.marketType || '').toLowerCase()}">${d.marketType || '-'}</span></td>
+                    <td>${fmtPrice(d.price)}</td>
+                    <td class="${sc}">${d.change != null ? (Number(d.change) > 0 ? '+' : '') + fmtNum(d.change) : '-'}</td>
+                    <td class="${sc}">${fmtPct(d.changePercent)}</td>
+                    <td>${sparkSvg(st.hist, 120, 28)}</td>
+                    <td>${d.volume != null ? fmtNum(d.volume, 3) : '-'}</td>
+                    <td>${d.exchange || '-'}</td>
+                    <td class="muted">${ageText(st.lastMs)}</td>
+                    <td><span class="rm" style="cursor:pointer;color:var(--down)" onclick="unsubscribe('${s}')">✕</span></td>
+                </tr>`;
+            }).join('');
+        }
+    }
+
+    function renderTags() {
+        document.getElementById('watchTags').innerHTML = Object.keys(subs).sort().map(s =>
+            `<span class="tag">${s}<span class="x" onclick="unsubscribe('${s}')">&times;</span></span>`).join('')
+            || '<span class="hint">구독 중인 종목 없음</span>';
+    }
+
+    // ---------- 상단 지표 (1초 주기) ----------
+    setInterval(() => {
+        const now = Date.now();
+        while (rxTimes.length && now - rxTimes[0] > 3000) rxTimes.shift();
+        document.getElementById('mRate').textContent = (rxTimes.length / 3).toFixed(1);
+
+        if (latSamples.length) {
+            const avg = latSamples.reduce((a, b) => a + b, 0) / latSamples.length;
+            document.getElementById('mLat').textContent = Math.round(avg) + ' ms';
+        }
+        render(); // 나이/스테일 갱신
+    }, 1000);
+
+    // ---------- 시드 ----------
+    async function seedFromActive() {
+        try {
+            const list = await API.activePrices() || [];
+            if (!list.length) { toast('서버가 수신 중인 종목이 없습니다 (수집기/데이터 확인)', 'err'); return; }
+            list.slice(0, MAX_SUBS).forEach(p => subscribe(p.symbol));
+            toast(`${Math.min(list.length, MAX_SUBS)}개 종목 구독`, 'ok');
+        } catch (e) { toast('활성 종목 조회 실패: ' + e.message, 'err'); }
+    }
+
+    async function seedFromOverview() {
+        try {
+            const ov = await API.marketOverview('') || {};
+            const picks = [...(ov.topGainers || []), ...(ov.topLosers || [])].map(x => x.symbol);
+            [...new Set(picks)].forEach(subscribe);
+            if (!picks.length) toast('등락 데이터가 아직 없습니다', 'err');
+        } catch (e) { toast('시장 개요 조회 실패: ' + e.message, 'err'); }
+    }
+
+    async function refreshActiveStat() {
+        try {
+            const list = await API.activePrices() || [];
+            document.getElementById('mActive').textContent = list.length;
+            document.getElementById('symbolOptions').innerHTML =
+                list.map(p => `<option value="${p.symbol}">`).join('');
+        } catch (e) { /* noop */ }
+    }
+
+    // ---------- 입력 ----------
+    function addFromInput() {
+        const el = document.getElementById('symInput');
+        el.value.split(/[\s,]+/).filter(Boolean).forEach(subscribe);
+        el.value = '';
+    }
+    document.getElementById('symInput').addEventListener('keydown', e => { if (e.key === 'Enter') addFromInput(); });
+    document.getElementById('sortSel').addEventListener('change', e => { sortMode = e.target.value; render(); });
+    document.getElementById('viewSeg').addEventListener('click', e => {
+        const b = e.target.closest('button'); if (!b) return;
+        view = b.dataset.v;
+        document.querySelectorAll('#viewSeg button').forEach(x => x.classList.toggle('on', x === b));
+        try { localStorage.setItem(LS_VIEW, view); } catch (err) {}
+        render();
+    });
+
+    // ---------- 시작 ----------
+    (function init() {
+        try {
+            const v = localStorage.getItem(LS_VIEW);
+            if (v) {
+                view = v;
+                document.querySelectorAll('#viewSeg button').forEach(x => x.classList.toggle('on', x.dataset.v === v));
+            }
+        } catch (e) {}
+
+        stomp = connectStomp(
+            () => { resubscribeAll(); render(); },
+            () => {}
+        );
+
+        refreshActiveStat();
+        setInterval(refreshActiveStat, 15000);
+
+        const saved = loadWatch();
+        if (saved.length) {
+            saved.forEach(subscribe);
+        } else {
+            // 첫 방문: 등락 상위로 채우고, 없으면 서버 수신 종목으로
+            seedFromOverview().then(() => {
+                setTimeout(() => { if (!Object.keys(subs).length) seedFromActive(); }, 800);
+            });
+        }
+        renderTags();
+        render();
+    })();
+</script>
+</body>
+</html>

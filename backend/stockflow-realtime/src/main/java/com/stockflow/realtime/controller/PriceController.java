@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -26,6 +27,17 @@ import java.util.Map;
 public class PriceController {
 
     private final RedisPriceService redisPriceService;
+
+    /**
+     * 실시간 수신 중인 전체 종목의 최신 스냅샷 조회
+     *
+     * Redis 에 price:latest:* 캐시가 있는 종목 목록을 반환한다.
+     * 실시간 시세 화면이 초기 워치리스트를 자동으로 구성하는 데 사용한다.
+     */
+    @GetMapping("/active")
+    public List<PriceSnapshot> getActivePrices() {
+        return redisPriceService.getActivePrices();
+    }
 
     /**
      * 종목별 최신 가격 조회

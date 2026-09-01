@@ -216,6 +216,40 @@ public class RedisPriceService {
     }
 
     /**
+     * 현재 Redis 에 최신가 캐시(price:latest:*)가 있는 모든 종목의 스냅샷.
+     *
+     * 실시간 시세 화면이 "지금 서버가 수신 중인 종목"을 자동으로 채우는 데 쓴다.
+     * 데모 규모(수백~수천 키)에서는 KEYS 스캔으로 충분하다. 운영 규모로 커지면
+     * SCAN + 커서 방식으로 바꿔야 한다.
+     */
+    public java.util.List<PriceSnapshot> getActivePrices() {
+        java.util.Set<String> keys = redisTemplate.keys(KEY_LATEST_PRICE + "*");
+        if (keys == null || keys.isEmpty()) {
+            return java.util.List.of();
+        }
+
+        java.util.List<String> keyList = new java.util.ArrayList<>(keys);
+        java.util.List<String> values = redisTemplate.opsForValue().multiGet(keyList);
+        if (values == null) {
+            return java.util.List.of();
+        }
+
+        java.util.List<PriceSnapshot> result = new java.util.ArrayList<>(values.size());
+        for (String value : values) {
+            if (value == null) {
+                continue;
+            }
+            try {
+                result.add(objectMapper.readValue(value, PriceSnapshot.class));
+            } catch (JsonProcessingException e) {
+                log.warn("Failed to deserialize active price snapshot", e);
+            }
+        }
+        result.sort(java.util.Comparator.comparing(PriceSnapshot::getSymbol));
+        return result;
+    }
+
+    /**
      * 전일 종가 조회
      */
     public BigDecimal getPreviousClose(String symbol) {

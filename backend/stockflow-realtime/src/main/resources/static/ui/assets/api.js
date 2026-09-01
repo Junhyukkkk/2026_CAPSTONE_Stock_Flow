@@ -33,6 +33,7 @@ const API = {
     indicators: (symbol, from, to) =>
         API.get(`/api/stocks/${encodeURIComponent(symbol)}/indicators?from=${from}&to=${to}`),
     latestPrice: (symbol) => API.get(`/api/price/${encodeURIComponent(symbol)}`),
+    activePrices: () => API.get('/api/price/active'),
     marketOverview: (marketType) =>
         API.get('/api/market/overview' + (marketType ? `?marketType=${marketType}` : '')),
 
@@ -93,9 +94,9 @@ function toast(msg, type = '') {
 function renderNav(active) {
     const links = [
         ['index.html', '대시보드'],
+        ['live.html', '실시간 시세'],
         ['stocks.html', '종목 & 차트'],
         ['backtest.html', '백테스팅'],
-        ['/price-monitor.html', '실시간 모니터(데모)'],
     ];
     const nav = links.map(([href, label]) =>
         `<a href="${href}" class="${href.includes(active) ? 'active' : ''}">${label}</a>`
