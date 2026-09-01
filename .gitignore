@@ -54,6 +54,8 @@ coverage/
 STOCKFLOW_MULTI_MODULE_GUIDE.md
 STOCKFLOW_REALTIME_GUIDE.md
 
-# 작업 중인 초안 문서 (정리 전)
-backend/docs/ConsumerTest.md
-backend/docs/PartitionTest.md
+# 작업 중인 초안 문서·개인 노트 (정리 전) — docs/perf 폴더의 md 초안은 커밋하지 않는다.
+# 공유용 문서(대시보드 JSON, 아키텍처 요약)는 계속 추적한다.
+backend/docs/*.md
+!backend/docs/Kafka_Redis_아키텍쳐요약.md
+backend/perf/*.md
