@@ -7,6 +7,7 @@ import com.stockflow.realtime.service.RedisPriceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
@@ -23,9 +24,14 @@ import org.springframework.stereotype.Component;
  * 
  * Consumer Group: realtime-group
  * Topic: market.normalized
+ *
+ * realtime.consumer.enabled=false 로 끌 수 있다 (기본 활성).
+ * 실시간 경로와 저장 경로를 별도 프로세스로 분리 배포할 때, 저장 전용 인스턴스에서 끈다.
+ * (StorageConsumer 의 storage.consumer.enabled 와 대칭)
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(name = "realtime.consumer.enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class RealtimeConsumer {
 

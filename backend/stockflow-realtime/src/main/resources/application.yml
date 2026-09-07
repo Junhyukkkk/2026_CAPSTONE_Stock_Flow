@@ -123,6 +123,20 @@ sentry:
   in-app-includes:
     - com.stockflow
 
+# 컨슈머/배치 on-off — 실시간 경로와 저장 경로를 별도 프로세스로 분리 배포할 때 사용.
+#   실시간 전용 인스턴스: STORAGE_CONSUMER_ENABLED=false, BATCH_SCHEDULER_ENABLED=false
+#   저장 전용 인스턴스:   REALTIME_CONSUMER_ENABLED=false
+# 지정하지 않으면 한 프로세스가 전부 처리(기존 동작).
+realtime:
+  consumer:
+    enabled: ${REALTIME_CONSUMER_ENABLED:true}
+storage:
+  consumer:
+    enabled: ${STORAGE_CONSUMER_ENABLED:true}
+batch:
+  scheduler:
+    enabled: ${BATCH_SCHEDULER_ENABLED:true}
+
 # Retry Policy 설정 (RetryPolicyConfig에서 참조)
 retry:
   mode: ${RETRY_MODE:sync}

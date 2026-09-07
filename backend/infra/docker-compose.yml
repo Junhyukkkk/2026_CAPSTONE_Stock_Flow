@@ -160,6 +160,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+    image: stockflow-app:local      # stockflow-storage(split 프로파일)가 재사용
     container_name: stockflow-realtime
     ports:
       - "8081:8081"
@@ -173,6 +174,11 @@ services:
       - KAFKA_MAX_POLL_INTERVAL_MS=${KAFKA_MAX_POLL_INTERVAL_MS:-300000}
       - KAFKA_CONSUMER_CONCURRENCY=${KAFKA_CONSUMER_CONCURRENCY:-12}
       - KAFKA_CONSUMER_MAX_POLL_RECORDS=${KAFKA_CONSUMER_MAX_POLL_RECORDS:-100}
+      # 컨슈머/배치 on-off — split 프로파일로 저장 경로를 분리할 때 이 인스턴스는 저장·배치를 끈다.
+      # 단일 프로세스로 쓰면 셋 다 기본 true (기존 동작).
+      - REALTIME_CONSUMER_ENABLED=${REALTIME_CONSUMER_ENABLED:-true}
+      - STORAGE_CONSUMER_ENABLED=${STORAGE_CONSUMER_ENABLED:-true}
+      - BATCH_SCHEDULER_ENABLED=${BATCH_SCHEDULER_ENABLED:-true}
       # 성능 개선안 토글 (부하 테스트로 검증됨 — 기본 ON, bench.sh 는 자체 컨테이너로 A/B)
       # redis/idempotency 파이프라인은 commons-pool2(커넥션 풀) 의존성이 있어야 이득이 있다.
       - STOCKFLOW_OPT_INSTRUMENT_CACHE=${STOCKFLOW_OPT_INSTRUMENT_CACHE:-true}
@@ -213,6 +219,61 @@ services:
       timescaledb:
         condition: service_started
       loki:
+        condition: service_started
+    networks:
+      - default
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ---- 저장 전용 인스턴스 (docker compose --profile split up -d) ----
+  # 실시간 경로와 저장 경로의 CPU 경합을 없애기 위해 저장·배치를 별도 프로세스로 분리한다.
+  # 이걸 켤 때는 infra/.env 에 아래를 넣어 realtime 인스턴스의 저장·배치를 꺼야 한다:
+  #   STORAGE_CONSUMER_ENABLED=false
+  #   BATCH_SCHEDULER_ENABLED=false
+  stockflow-storage:
+    image: stockflow-app:local
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: stockflow-storage
+    profiles: ["split"]
+    ports:
+      - "8082:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-loki}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_CONSUMER_GROUP_REALTIME=realtime-group
+      - KAFKA_CONSUMER_GROUP_STORAGE=storage-group
+      - KAFKA_CONSUMER_CONCURRENCY=${KAFKA_CONSUMER_CONCURRENCY:-12}
+      - KAFKA_CONSUMER_MAX_POLL_RECORDS=${KAFKA_CONSUMER_MAX_POLL_RECORDS:-100}
+      # 이 인스턴스는 저장 + 배치만
+      - REALTIME_CONSUMER_ENABLED=false
+      - STORAGE_CONSUMER_ENABLED=true
+      - BATCH_SCHEDULER_ENABLED=true
+      - STOCKFLOW_OPT_INSTRUMENT_CACHE=${STOCKFLOW_OPT_INSTRUMENT_CACHE:-true}
+      - STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=${STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE:-true}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DB_HOST=timescaledb
+      - DB_PORT=5432
+      - DB_NAME=stockflow
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=postgres
+      - LOKI_URL=${LOKI_URL:-http://loki:3100/loki/api/v1/push}
+      - LOKI_MIN_LEVEL=${LOKI_MIN_LEVEL:-INFO}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - RETRY_MODE=${RETRY_MODE:-sync}
+    depends_on:
+      kafka-setup:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      timescaledb:
         condition: service_started
     networks:
       - default
