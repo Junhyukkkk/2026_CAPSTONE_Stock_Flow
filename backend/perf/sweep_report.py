@@ -23,7 +23,8 @@ def read(path):
 
 
 def prom_val(text, name):
-    m = re.search(rf'^{re.escape(name)}\s+([-\d.eE+]+)', text, re.M)
+    # 라벨 유무 모두 처리: `name 1.0` / `name{a="b"} 1.0`
+    m = re.search(rf'^{re.escape(name)}(?:\{{[^}}]*\}})?\s+([-\d.eE+]+)', text, re.M)
     return float(m.group(1)) if m else None
 
 
@@ -93,21 +94,23 @@ for r in rows:
           f"{float(r['consume_storage']):,.0f} | {float(r['peak_lag']):,.0f} | {dr} | {r['verdict']} |")
 print()
 
-# 병목 분석: 첫 SATURATED / MARGINAL rate 구간
+def lo(xs, col):
+    vals = [float(x[col]) for x in xs if x.get(col) not in (None, '', 'nan')]
+    return min(vals) if vals else 0.0
+
+
 print('## 구간별 자원 상태 (부하 중 피크)\n')
-print('| rate | CPU app | CPU kafka | CPU redis | CPU pg | Redis 메모리 | Redis 축출Δ | Hikari pending | proc_time avg |')
-print('| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
+print('| rate | CPU app | CPU kafka | CPU redis | CPU pg | load1 | RAM free 최저 | swap | Redis 축출Δ | Hikari pending |')
+print('| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
 for r in rows:
     rate = r['target']
     xs = hold_window(rate)
-    a = read(f'{OUT}/{rate}_A.redis'); b = read(f'{OUT}/{rate}_B.redis')
-    ev_a = float(redis_field(a, 'evicted_keys') or 0)
-    ev_b = float(redis_field(b, 'evicted_keys') or 0)
-    bprom = read(f'{OUT}/{rate}_B.prom')
-    hikari_pending = prom_val(bprom, 'hikaricp_connections_pending') or 0
+    ev_a = float(redis_field(read(f'{OUT}/{rate}_A.redis'), 'evicted_keys') or 0)
+    ev_b = float(redis_field(read(f'{OUT}/{rate}_B.redis'), 'evicted_keys') or 0)
+    hp = prom_val(read(f'{OUT}/{rate}_B.prom'), 'hikaricp_connections_pending') or 0
     print(f"| {rate} | {peak(xs,'cpu_app'):.0f}% | {peak(xs,'cpu_kafka'):.0f}% | {peak(xs,'cpu_redis'):.0f}% | "
-          f"{peak(xs,'cpu_pg'):.0f}% | {peak(xs,'redis_mem_mb'):.0f}MB | {ev_b-ev_a:,.0f} | "
-          f"{hikari_pending:.0f} | {peak(xs,'proc_time_avg'):.1f}ms |")
+          f"{peak(xs,'cpu_pg'):.0f}% | {peak(xs,'load1'):.1f} | {lo(xs,'mem_free_mb'):.0f}MB | "
+          f"{peak(xs,'swap_used_mb'):.0f}MB | {ev_b-ev_a:,.0f} | {hp:.0f} |")
 print()
 
 kept = [r for r in rows if r['verdict'] == 'KEPT_UP']
@@ -118,7 +121,10 @@ first_sat = min((int(r['target']) for r in sat), default=None)
 print('## 결론\n')
 if ceiling:
     print(f'- **이 서버가 지속적으로 소화한 최대 rate ≈ {ceiling:,} msg/s** '
-          f'(이 rate까지는 부하 중 소비율이 전송률을 따라갔고, 종료 후 lag 이 배수됨)')
+          f'(이 rate까지는 부하 중 realtime 소비율이 전송률을 따라갔고 적체가 얕게 유지됨)')
+else:
+    print('- **가장 낮은 테스트 rate 부터 이미 포화** — 지속 처리량은 그보다 낮음. '
+          'RATES 를 더 낮춰 다시 측정 필요.')
 if first_sat:
     sr = next(r for r in rows if r['target'] == str(first_sat))
     xs = hold_window(first_sat)
