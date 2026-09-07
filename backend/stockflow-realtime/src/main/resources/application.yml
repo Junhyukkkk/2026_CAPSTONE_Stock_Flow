@@ -101,7 +101,9 @@ management:
 
 logging:
   level:
-    com.stockflow: DEBUG
+    # 부하 시 DEBUG 는 메시지당 로그 3줄(초당 1만+)이라 처리량 병목이 된다.
+    # 운영 기본 INFO, 디버깅 시 LOGGING_LEVEL_COM_STOCKFLOW=DEBUG.
+    com.stockflow: ${LOGGING_LEVEL_COM_STOCKFLOW:INFO}
     org.springframework.kafka: INFO
     org.springframework.data.redis: INFO
 
