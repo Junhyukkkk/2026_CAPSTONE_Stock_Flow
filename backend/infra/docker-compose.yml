@@ -128,7 +128,6 @@ services:
     container_name: stockflow-alertmanager-discord
     environment:
       - DISCORD_WEBHOOK=${DISCORD_WEBHOOK:-}
-      
     restart: unless-stopped
     depends_on:
       - alertmanager
