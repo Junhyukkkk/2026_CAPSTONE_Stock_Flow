@@ -70,7 +70,7 @@ services:
       - "6379:6379"
     command: >
       redis-server
-      --maxmemory 256mb
+      --maxmemory 2gb
       --maxmemory-policy allkeys-lru
       --save ""
       --appendonly no
@@ -173,6 +173,13 @@ services:
       - KAFKA_MAX_POLL_INTERVAL_MS=${KAFKA_MAX_POLL_INTERVAL_MS:-300000}
       - KAFKA_CONSUMER_CONCURRENCY=${KAFKA_CONSUMER_CONCURRENCY:-12}
       - KAFKA_CONSUMER_MAX_POLL_RECORDS=${KAFKA_CONSUMER_MAX_POLL_RECORDS:-100}
+      # 성능 개선안 토글 (부하 테스트로 검증됨 — 기본 ON, bench.sh 는 자체 컨테이너로 A/B)
+      # redis/idempotency 파이프라인은 commons-pool2(커넥션 풀) 의존성이 있어야 이득이 있다.
+      - STOCKFLOW_OPT_INSTRUMENT_CACHE=${STOCKFLOW_OPT_INSTRUMENT_CACHE:-true}
+      - STOCKFLOW_OPT_PREV_CLOSE_LOCAL_CACHE=${STOCKFLOW_OPT_PREV_CLOSE_LOCAL_CACHE:-true}
+      - STOCKFLOW_OPT_WS_TASK_EXECUTOR=${STOCKFLOW_OPT_WS_TASK_EXECUTOR:-true}
+      - STOCKFLOW_OPT_REDIS_PIPELINE=${STOCKFLOW_OPT_REDIS_PIPELINE:-true}
+      - STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=${STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE:-true}
       # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
