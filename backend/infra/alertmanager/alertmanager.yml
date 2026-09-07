@@ -1,9 +1,8 @@
 # Alertmanager — Prometheus 경보를 Discord 로 전달.
 #
-# Discord 웹훅은 Slack 형식 payload 를 <웹훅URL>/slack 엔드포인트로 받아준다.
-# 그래서 별도 브릿지 없이 slack_configs 를 그 주소로 돌리면 된다.
-# 실제 URL 은 컨테이너 기동 시 DISCORD_WEBHOOK 환경변수에서 /tmp/discord_webhook.url 로 기록된다
-# (repo·이미지에 토큰을 남기지 않기 위함).
+# Discord 는 Slack 형식 payload 를 완전히 호환하진 않아서(첨부 구조가 엄격),
+# alertmanager-discord 브릿지 컨테이너를 거친다. 브릿지가 Alertmanager 의 webhook
+# JSON 을 Discord 임베드로 변환해 DISCORD_WEBHOOK(infra/.env)으로 보낸다.
 
 global:
   resolve_timeout: 5m
@@ -17,15 +16,6 @@ route:
 
 receivers:
   - name: discord
-    slack_configs:
-      - api_url_file: /tmp/discord_webhook.url
-        channel: 'stockflow'          # Discord 는 무시하지만 Alertmanager 가 요구
+    webhook_configs:
+      - url: 'http://alertmanager-discord:9094'
         send_resolved: true
-        title: >-
-          {{ if eq .Status "firing" }}🔴{{ else }}🟢{{ end }} [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}
-        text: >-
-          {{ range .Alerts -}}
-          **{{ .Annotations.summary }}**
-          {{ .Annotations.description }}
-          `severity={{ .Labels.severity }}`  `group={{ .Labels.group }}`
-          {{ end }}

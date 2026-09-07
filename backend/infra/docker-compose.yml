@@ -108,31 +108,30 @@ services:
     depends_on:
       - stockflow-realtime
 
-  # Alertmanager - Prometheus 경보를 Discord 로 전달
-  # DISCORD_WEBHOOK (infra/.env) 이 비어 있으면 경보는 발동해도 전송되지 않는다.
+  # Alertmanager - Prometheus 경보 라우팅
   alertmanager:
     image: prom/alertmanager:v0.27.0
     container_name: stockflow-alertmanager
     ports:
       - "9093:9093"
-    environment:
-      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK:-}
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
       - alertmanager-data:/alertmanager
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        if [ -n "$${DISCORD_WEBHOOK}" ]; then
-          printf '%s/slack' "$${DISCORD_WEBHOOK}" > /tmp/discord_webhook.url
-        else
-          echo 'https://example.invalid/slack' > /tmp/discord_webhook.url
-          echo '!! DISCORD_WEBHOOK 미설정 — 경보 전송 비활성'
-        fi
-        exec /bin/alertmanager --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/alertmanager
     restart: unless-stopped
     depends_on:
       - prometheus
+
+  # Alertmanager → Discord 브릿지 (webhook JSON → Discord 임베드)
+  # DISCORD_WEBHOOK (infra/.env) 이 비어 있으면 경보는 발동·라우팅되지만 Discord 로는 안 감.
+  alertmanager-discord:
+    image: rogerrum/alertmanager-discord:1.0.0
+    container_name: stockflow-alertmanager-discord
+    environment:
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK:-}
+      - LISTEN_ADDRESS=0.0.0.0:9094
+    restart: unless-stopped
+    depends_on:
+      - alertmanager
 
   # Loki - 로그 수집 저장소
   loki:
