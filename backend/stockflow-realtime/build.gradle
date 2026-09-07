@@ -13,6 +13,9 @@ dependencies {
 
     // Redis
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    // Lettuce 커넥션 풀 활성화 (없으면 spring.data.redis.lettuce.pool 설정이 무시되고
+    // 모든 Redis 명령이 단일 연결로 직렬화됨 — 부하 테스트에서 실시간 경로 병목으로 확인)
+    implementation 'org.apache.commons:commons-pool2'
 
     // WebSocket (STOMP)
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
