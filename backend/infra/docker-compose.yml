@@ -124,11 +124,11 @@ services:
   # Alertmanager → Discord 브릿지 (webhook JSON → Discord 임베드)
   # DISCORD_WEBHOOK (infra/.env) 이 비어 있으면 경보는 발동·라우팅되지만 Discord 로는 안 감.
   alertmanager-discord:
-    image: rogerrum/alertmanager-discord:1.0.0
+    image: benjojo/alertmanager-discord:latest
     container_name: stockflow-alertmanager-discord
     environment:
       - DISCORD_WEBHOOK=${DISCORD_WEBHOOK:-}
-      - LISTEN_ADDRESS=0.0.0.0:9094
+      
     restart: unless-stopped
     depends_on:
       - alertmanager
