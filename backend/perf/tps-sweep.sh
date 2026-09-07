@@ -92,6 +92,8 @@ wait_health() {
   docker exec "$APP_C" env 2>/dev/null | grep -iE "KAFKA_CONSUMER|STORAGE_CONSUMER|STOCKFLOW_OPT|SPRING_PROFILES|JAVA_TOOL" | sort
   echo; echo "== code rev =="
   (cd "$SCRIPT_DIR/.." && git log -1 --oneline 2>/dev/null)
+  echo "app image: $(docker inspect "$APP_C" --format '{{.Config.Image}}' 2>/dev/null)"
+  echo "stage_seconds present: $(curl -s --max-time 8 "$APP_URL/actuator/prometheus" 2>/dev/null | grep -cE '^stockflow_stage_seconds')"
 } > "$OUT/env.txt" 2>&1
 log "환경 → $OUT/env.txt"
 wait_health
@@ -129,11 +131,14 @@ echo "idle 0" > "$PHASEF"
 setphase() { echo "$1 ${2:-0}" > "$PHASEF"; }
 sampler() {
   echo "epoch,phase,rate,lag_realtime,lag_storage,consumed_realtime,consumed_storage,throughput,proc_time_avg,redis_mem_mb,redis_evicted,redis_ops,mem_free_mb,swap_used_mb,load1,cpu_app,cpu_kafka,cpu_redis,cpu_pg" > "$TIMELINE"
+  local prom_prev=""
   while true; do
     local prom redis stats free_out ph
-    prom=$(app_prom)
+    # 부하 중 앱이 느려 curl 이 실패하면 직전 스냅샷을 재사용한다 (빈 값 → 0 기록 방지).
+    prom=$(curl -s --max-time 20 --retry 1 "$APP_URL/actuator/prometheus" 2>/dev/null)
+    [ -z "$prom" ] && prom="$prom_prev" || prom_prev="$prom"
     redis=$(timeout 15 docker exec "$REDIS_C" redis-cli INFO 2>/dev/null | tr -d '\r')
-    stats=$(timeout 20 docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' "$APP_C" "$KAFKA_C" "$REDIS_C" "$PG_C" 2>/dev/null)
+    stats=$(timeout 25 docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' "$APP_C" "$KAFKA_C" "$REDIS_C" "$PG_C" 2>/dev/null)
     free_out=$(free -m 2>/dev/null)
     ph=$(cat "$PHASEF" 2>/dev/null); ph=${ph:-idle 0}
     g() { echo "$prom" | grep "^kafka_consumer_fetch_manager_records_$1{" | grep "$2-group" | prom_sum; }
