@@ -1,0 +1,21 @@
+# Alertmanager — Prometheus 경보를 Discord 로 전달.
+#
+# Discord 는 Slack 형식 payload 를 완전히 호환하진 않아서(첨부 구조가 엄격),
+# alertmanager-discord 브릿지 컨테이너를 거친다. 브릿지가 Alertmanager 의 webhook
+# JSON 을 Discord 임베드로 변환해 DISCORD_WEBHOOK(infra/.env)으로 보낸다.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: discord
+  group_by: ['alertname', 'group']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h        # 같은 경보가 계속 firing 이어도 4시간마다만 재알림
+
+receivers:
+  - name: discord
+    webhook_configs:
+      - url: 'http://alertmanager-discord:9094'
+        send_resolved: true

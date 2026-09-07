@@ -108,6 +108,30 @@ services:
     depends_on:
       - stockflow-realtime
 
+  # Alertmanager - Prometheus 경보 라우팅
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: stockflow-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager-data:/alertmanager
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # Alertmanager → Discord 브릿지 (webhook JSON → Discord 임베드)
+  # DISCORD_WEBHOOK (infra/.env) 이 비어 있으면 경보는 발동·라우팅되지만 Discord 로는 안 감.
+  alertmanager-discord:
+    image: benjojo/alertmanager-discord:latest
+    container_name: stockflow-alertmanager-discord
+    environment:
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK:-}
+    restart: unless-stopped
+    depends_on:
+      - alertmanager
+
   # Loki - 로그 수집 저장소
   loki:
     image: grafana/loki:3.1.1
@@ -412,6 +436,7 @@ volumes:
   zookeeper-data:
   zookeeper-log:
   prometheus-data:     # 메트릭 (7d 보관)
+  alertmanager-data:   # 경보 상태(silence 등)
   grafana-data:        # Grafana 내부 상태
   loki-data:           # 수집된 로그 (72h 보관)
   glitchtip-pg-data:   # GlitchTip 계정·프로젝트·이슈
