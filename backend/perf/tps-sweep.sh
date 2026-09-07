@@ -30,7 +30,7 @@ RATES=${RATES:-"2000 3000 4000 4300 5000 6000 7000 8000"}
 HOLD=${HOLD:-180}
 DRAIN_WAIT=${DRAIN_WAIT:-150}
 SETTLE=${SETTLE:-30}
-SAMPLE_INTERVAL=${SAMPLE_INTERVAL:-5}
+SAMPLE_INTERVAL=${SAMPLE_INTERVAL:-10}
 WORKERS=${WORKERS:-6}
 SYMBOLS=${SYMBOLS:-50}
 STOP_COLLECTORS=${STOP_COLLECTORS:-1}
@@ -53,7 +53,7 @@ STORAGE_GROUP=${STORAGE_GROUP:-storage-group}
 
 OUT="$SCRIPT_DIR/results/sweep_${LABEL}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUT"
-export APP_URL KAFKA_C REDIS_C PG_C KAFKA_BOOTSTRAP REALTIME_GROUP STORAGE_GROUP
+export APP_URL APP_C KAFKA_C REDIS_C PG_C KAFKA_BOOTSTRAP REALTIME_GROUP STORAGE_GROUP
 
 log() { echo -e "\033[1;36m[$(date +%H:%M:%S)]\033[0m $*"; }
 app_prom() { curl -s --max-time 10 "$APP_URL/actuator/prometheus" 2>/dev/null; }
@@ -122,42 +122,47 @@ cleanup() {
 trap cleanup EXIT
 
 # ── 3. 표본 수집기 (백그라운드, SAMPLE_INTERVAL 초) ────────────
+# phase/rate 는 파일로 전달한다 (실행 중인 백그라운드 함수는 부모 env 갱신을 못 봄).
 TIMELINE="$OUT/timeline.csv"
+PHASEF="$OUT/.phase"
+echo "idle 0" > "$PHASEF"
+setphase() { echo "$1 ${2:-0}" > "$PHASEF"; }
 sampler() {
   echo "epoch,phase,rate,lag_realtime,lag_storage,consumed_realtime,consumed_storage,throughput,proc_time_avg,redis_mem_mb,redis_evicted,redis_ops,mem_free_mb,swap_used_mb,load1,cpu_app,cpu_kafka,cpu_redis,cpu_pg" > "$TIMELINE"
   while true; do
-    local prom redis stats free_out
+    local prom redis stats free_out ph
     prom=$(app_prom)
-    redis=$(docker exec "$REDIS_C" redis-cli INFO 2>/dev/null | tr -d '\r')
-    stats=$(docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' 2>/dev/null)
+    redis=$(timeout 15 docker exec "$REDIS_C" redis-cli INFO 2>/dev/null | tr -d '\r')
+    stats=$(timeout 20 docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' "$APP_C" "$KAFKA_C" "$REDIS_C" "$PG_C" 2>/dev/null)
     free_out=$(free -m 2>/dev/null)
+    ph=$(cat "$PHASEF" 2>/dev/null); ph=${ph:-idle 0}
     g() { echo "$prom" | grep "^kafka_consumer_fetch_manager_records_$1{" | grep "$2-group" | prom_sum; }
-    rf() { echo "$redis" | awk -F: -v k="$1" '$1==k{print $2+0}'; }
-    cpu() { echo "$stats" | awk -v n="$1" '$1==n{gsub(/%/,"",$2); print $2+0}'; }
-    echo "$(date +%s),${PHASE:-idle},${CUR_RATE:-0},$(g lag realtime),$(g lag storage),$(g consumed_total realtime),$(g consumed_total storage),$(echo "$prom"|awk '/^stockflow_throughput_per_second /{print $2}'),$(echo "$prom"|awk '/^stockflow_processing_time_avg /{print $2}'),$(rf used_memory | awk '{printf "%.1f",$1/1048576}'),$(rf evicted_keys),$(rf instantaneous_ops_per_sec),$(echo "$free_out"|awk '/^Mem:/{print $4}'),$(echo "$free_out"|awk '/^Swap:/{print $3}'),$(awk '{print $1}' /proc/loadavg),$(cpu $APP_C),$(cpu $KAFKA_C),$(cpu $REDIS_C),$(cpu $PG_C)" >> "$TIMELINE"
+    pv() { echo "$prom" | awk -v m="$1" '$0 ~ "^"m"([ {])" && $0 !~ /^#/ {print $NF; exit}'; }
+    rf() { echo "$redis" | awk -F: -v k="$1" '$1==k{gsub(/[^0-9.]/,"",$2); print $2; exit}'; }
+    cpu() { echo "$stats" | awk -v n="$1" '$1==n{gsub(/%/,"",$2); print $2+0; exit}'; }
+    echo "$(date +%s),${ph% *},${ph#* },$(g lag realtime),$(g lag storage),$(g consumed_total realtime),$(g consumed_total storage),$(pv stockflow_throughput_per_second),$(pv stockflow_processing_time_avg),$(awk -v b="$(rf used_memory)" 'BEGIN{printf "%.1f", b/1048576}'),$(rf evicted_keys),$(rf instantaneous_ops_per_sec),$(echo "$free_out"|awk '/^Mem:/{print $4}'),$(echo "$free_out"|awk '/^Swap:/{print $3}'),$(awk '{print $1}' /proc/loadavg),$(cpu $APP_C),$(cpu $KAFKA_C),$(cpu $REDIS_C),$(cpu $PG_C)" >> "$TIMELINE"
     sleep "$SAMPLE_INTERVAL"
   done
 }
-PHASE=idle CUR_RATE=0 sampler & SAMPLER_PID=$!
+sampler & SAMPLER_PID=$!
 
 # ── 4. rate 스윕 ───────────────────────────────────────────────
 echo "rate,effective_send,consume_realtime,consume_storage,peak_lag_rt,end_lag_rt,drain_s,verdict" > "$OUT/summary.csv"
 for RATE in $RATES; do
-  export CUR_RATE=$RATE
   log "════════ rate=$RATE msg/s (${HOLD}s) ════════"
-  export PHASE=snapA
+  setphase snapA "$RATE"
   "$SCRIPT_DIR/snapshot.sh" "$OUT/${RATE}_A" >/dev/null
   a_epoch=$(date +%s)
   a_rt=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_A.prom" | grep realtime-group | prom_sum)
   a_st=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_A.prom" | grep storage-group | prom_sum)
 
-  export PHASE=hold
+  setphase hold "$RATE"
   run_loadgen "$RATE" "$HOLD" "$OUT/${RATE}_loadgen.log" || log "!! loadgen 비정상 종료"
   b_epoch=$(date +%s)
   eff=$(grep -oE 'effective_rate=[0-9.]+' "$OUT/${RATE}_loadgen.log" | tail -1 | cut -d= -f2)
   log "loadgen 완료. 실효 ≈ ${eff:-?} msg/s"
 
-  export PHASE=drain
+  setphase drain "$RATE"
   "$SCRIPT_DIR/snapshot.sh" "$OUT/${RATE}_B" >/dev/null
   b_rt=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_B.prom" | grep realtime-group | prom_sum)
   b_st=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_B.prom" | grep storage-group | prom_sum)
@@ -174,12 +179,18 @@ for RATE in $RATES; do
   done
   peak=$(awk -F, -v s="$a_epoch" -v e="$b_epoch" 'NR>1&&$1>=s&&$1<=e{if($4>m)m=$4}END{print m+0}' "$TIMELINE")
   endl=$(total_lag realtime)
-  verdict=$(awk -v c="$crt" -v s="${eff:-0}" -v el="${endl:-0}" -v dr="$drained" 'BEGIN{
-    if(s>0 && c/s>=0.92 && dr!="timeout") print "KEPT_UP";
-    else if(dr=="timeout" || el>5000) print "SATURATED"; else print "MARGINAL"}')
+  # 판정: 부하 중 realtime 소비율이 실효 전송률을 따라갔나 + 적체가 얕게 유지됐나.
+  #   KEPT_UP  : 소비 >= 전송*0.9  그리고  peak lag < 전송*8 (≈8초치 이내)
+  #   SATURATED: 소비 <  전송*0.8  (뚜렷이 뒤처짐)  또는  종료 후에도 안 빠짐
+  #   MARGINAL : 그 사이
+  verdict=$(awk -v c="$crt" -v s="${eff:-0}" -v pk="${peak:-0}" -v el="${endl:-0}" -v dr="$drained" 'BEGIN{
+    if(s<=0){print "?"; exit}
+    if(dr=="timeout" || el>5000 || c < s*0.8) {print "SATURATED"; exit}
+    if(c >= s*0.9 && pk < s*8) {print "KEPT_UP"; exit}
+    print "MARGINAL"}')
   log "판정: $verdict  (소비 rt≈${crt}/s st≈${cst}/s, peak lag ${peak}, 배수 ${drained})"
   echo "$RATE,${eff:-0},$crt,$cst,$peak,$endl,$drained,$verdict" >> "$OUT/summary.csv"
-  export PHASE=settle CUR_RATE=0; sleep "$SETTLE"
+  setphase settle 0; sleep "$SETTLE"
 done
 
 # ── 5. 리포트 ─────────────────────────────────────────────────
