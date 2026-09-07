@@ -54,7 +54,7 @@ env = read(f'{OUT}/env.txt')
 nproc = re.search(r'nproc=(\d+)', env)
 mem = re.search(r'Mem:\s+(\S+)', env)
 parts = re.search(r'PartitionCount:\s*(\d+)', env)
-gitrev = re.search(r'== git ==\n(\w+)', env)
+gitrev = re.search(r'== code rev ==\n(\w+)', env)
 stage_present = 'stockflow_stage_seconds' in read(glob.glob(f'{OUT}/*_B.prom')[0]) if glob.glob(f'{OUT}/*_B.prom') else False
 
 rows = list(csv.DictReader(open(f'{OUT}/summary.csv')))
@@ -90,8 +90,8 @@ print('| ---: | ---: | ---: | ---: | ---: | ---: | :--- |')
 for r in rows:
     dr = r['drain_s']
     dr = f'{dr}s' if dr.isdigit() else dr
-    print(f"| {r['target']} | {float(r['effective_send']):,.0f} | {float(r['consume_realtime']):,.0f} | "
-          f"{float(r['consume_storage']):,.0f} | {float(r['peak_lag']):,.0f} | {dr} | {r['verdict']} |")
+    print(f"| {r['rate']} | {float(r['effective_send']):,.0f} | {float(r['consume_realtime']):,.0f} | "
+          f"{float(r['consume_storage']):,.0f} | {float(r['peak_lag_rt']):,.0f} | {dr} | {r['verdict']} |")
 print()
 
 def lo(xs, col):
@@ -103,7 +103,7 @@ print('## 구간별 자원 상태 (부하 중 피크)\n')
 print('| rate | CPU app | CPU kafka | CPU redis | CPU pg | load1 | RAM free 최저 | swap | Redis 축출Δ | Hikari pending |')
 print('| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
 for r in rows:
-    rate = r['target']
+    rate = r['rate']
     xs = hold_window(rate)
     ev_a = float(redis_field(read(f'{OUT}/{rate}_A.redis'), 'evicted_keys') or 0)
     ev_b = float(redis_field(read(f'{OUT}/{rate}_B.redis'), 'evicted_keys') or 0)
@@ -115,8 +115,8 @@ print()
 
 kept = [r for r in rows if r['verdict'] == 'KEPT_UP']
 sat = [r for r in rows if r['verdict'] == 'SATURATED']
-ceiling = max((int(r['target']) for r in kept), default=None)
-first_sat = min((int(r['target']) for r in sat), default=None)
+ceiling = max((int(r['rate']) for r in kept), default=None)
+first_sat = min((int(r['rate']) for r in sat), default=None)
 
 print('## 결론\n')
 if ceiling:
@@ -126,7 +126,7 @@ else:
     print('- **가장 낮은 테스트 rate 부터 이미 포화** — 지속 처리량은 그보다 낮음. '
           'RATES 를 더 낮춰 다시 측정 필요.')
 if first_sat:
-    sr = next(r for r in rows if r['target'] == str(first_sat))
+    sr = next(r for r in rows if r['rate'] == str(first_sat))
     xs = hold_window(first_sat)
     # 병목 추정
     cand = []
