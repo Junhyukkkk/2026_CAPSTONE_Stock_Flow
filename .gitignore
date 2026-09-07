@@ -59,3 +59,8 @@ STOCKFLOW_REALTIME_GUIDE.md
 backend/docs/*.md
 !backend/docs/Kafka_Redis_아키텍쳐요약.md
 backend/perf/*.md
+!backend/perf/README.md
+!backend/perf/SERVER_TEST.md
+!backend/perf/GRAFANA_GAPS.md
+
+!backend/perf/RESULTS.md

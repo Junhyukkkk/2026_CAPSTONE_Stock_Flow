@@ -319,6 +319,86 @@ services:
     environment: *glitchtip-env
     restart: "no"
 
+  # ---- 부하 생성기 (docker compose --profile loadgen run --rm loadgen) ----
+  # backend/perf/tps-sweep.sh 가 rate 를 -e 로 넘겨 반복 호출한다.
+  # 수집기와 같은 이미지(전송 설정 동일)를 쓰고, /perf 만 마운트한다.
+  loadgen:
+    build:
+      context: ../../collectors
+      dockerfile: Dockerfile
+    image: stockflow-collectors
+    container_name: stockflow-loadgen
+    profiles: ["loadgen"]
+    working_dir: /app
+    volumes:
+      - ../perf:/perf
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - PYTHONPATH=/app
+      - RATE=${RATE:-500}
+      - DURATION=${DURATION:-60}
+      - WORKERS=${WORKERS:-6}
+      - SYMBOLS=${SYMBOLS:-50}
+      - BATCH_TICK_MS=${BATCH_TICK_MS:-5}
+      - KAFKA_LINGER_MS=${KAFKA_LINGER_MS:-10}
+      - TOPIC=${TOPIC:-market.normalized}
+    command: ["python", "/perf/loadgen.py"]
+    restart: "no"
+
+  # ---- 메트릭 exporter (docker compose --profile metrics up -d) ----
+  # 기본 스택엔 앱 1개만 스크레이프돼서 Grafana 의 kafka/redis/host 패널이 비어 있다.
+  # 이 프로파일을 켜면 채워진다. 기본 up -d 동작에는 영향 없음.
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    container_name: stockflow-kafka-exporter
+    profiles: ["metrics"]
+    command: ["--kafka.server=kafka:9092", "--web.listen-address=:9308"]
+    ports:
+      - "9308:9308"
+    depends_on:
+      - kafka
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    container_name: stockflow-redis-exporter
+    profiles: ["metrics"]
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    ports:
+      - "9121:9121"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: stockflow-node-exporter
+    profiles: ["metrics"]
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    volumes:
+      - '/:/host:ro,rslave'
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: stockflow-cadvisor
+    profiles: ["metrics"]
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "8088:8080"
+    restart: unless-stopped
+
 volumes:
   timescale-data:      # 원본 틱·일봉·지표·백테스트·배치이력 (진짜 데이터)
   kafka-data:          # Kafka 토픽 로그·컨슈머 오프셋
