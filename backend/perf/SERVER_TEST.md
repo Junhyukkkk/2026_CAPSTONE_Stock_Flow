@@ -81,7 +81,19 @@ perf/results/sweep_p6_<timestamp>/
 
 ---
 
-## 3. 유실(retention cliff) 재현 — 선택
+## 3. 최신 코드 + 12파티션으로 재측정 (Phase 2)
+
+서버가 구버전이면 `phase2.sh` 로 최신 `main` 이미지를 빌드해 교체한다 (되돌릴 수 있음).
+
+```bash
+cd backend/perf
+./phase2.sh build      # origin/main 을 worktree 로 받아 stockflow-realtime:main 빌드 (~5분)
+./phase2.sh deploy     # 토픽 12파티션 + 컨테이너 교체 (구 컨테이너는 -p1 로 보존)
+./tps-sweep.sh p12main # 재측정
+./phase2.sh restore    # 원래 컨테이너로 복구 (토픽 파티션은 12 유지 — 축소 불가)
+```
+
+## 4. 유실(retention cliff) 재현 — 선택
 
 8/5 미팅 실험 B를 4시간 대신 몇 분으로 재현한다.
 retention.ms 를 잠깐 5분으로 바꿨다가 원복하므로 **끝까지 실행**할 것.
@@ -93,7 +105,12 @@ retention.ms 를 잠깐 5분으로 바꿨다가 원복하므로 **끝까지 실�
 
 ---
 
-## 4. 결과를 원격에서 분석시키려면
+## 5. Grafana 패널이 비는 문제
+
+원인·조치는 [GRAFANA_GAPS.md](GRAFANA_GAPS.md) 참조. 요약: exporter 부재 + e2e 지표
+음수(서버 시계 skew) + 구버전 지표 누락.
+
+## 6. 결과를 원격에서 분석시키려면
 
 ```bash
 cd ~/capstone && git add -f backend/perf/results/sweep_* backend/perf/results/cliff_* && \

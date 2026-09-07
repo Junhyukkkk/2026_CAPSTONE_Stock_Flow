@@ -29,27 +29,26 @@ build)
   ;;
 
 deploy)
+  exec > >(tee /tmp/p2deploy.out) 2>&1
+  set -x
   docker image inspect "$IMG" >/dev/null 2>&1 || { echo "!! $IMG 없음 — 먼저 ./phase2.sh build"; exit 1; }
-  echo ">> 토픽 12 파티션"
   docker exec stockflow-kafka kafka-topics --bootstrap-server localhost:9092 \
     --alter --topic market.normalized --partitions 12 || echo "(이미 12거나 실패)"
-  echo ">> env 복사 → /tmp/rt.env"
   docker inspect stockflow-realtime --format '{{range .Config.Env}}{{println .}}{{end}}' \
     | grep -E '^(KAFKA_|REDIS_|DB_|SPRING_|RETRY_|LOKI_|SENTRY_|STOCKFLOW_|JAVA_TOOL_OPTIONS|MONITORING_)' > /tmp/rt.env
-  cat /tmp/rt.env
-  echo ">> 컨테이너 교체"
+  wc -l /tmp/rt.env
   docker stop stockflow-realtime
   docker rename stockflow-realtime stockflow-realtime-p1
   docker run -d --name stockflow-realtime --network infra_default -p 8081:8081 \
     --restart unless-stopped --env-file /tmp/rt.env "$IMG"
-  echo ">> 헬스 대기"
-  for i in $(seq 1 50); do
-    curl -s --max-time 3 localhost:8081/actuator/health 2>/dev/null | grep -q '"UP"' && { echo "  UP ($((i*3))s)"; break; }
+  set +x
+  for i in $(seq 1 60); do
+    curl -s --max-time 3 localhost:8081/actuator/health 2>/dev/null | grep -q '"UP"' && { echo "UP after $((i*3))s"; break; }
     sleep 3
   done
-  sleep 10
-  docker exec stockflow-kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic market.normalized | head -1
-  curl -s localhost:8081/actuator/prometheus | grep -E '^stockflow_stage_seconds_count|^kafka_consumer_coordinator_assigned_partitions' | head -5
+  sleep 15
+  docker exec stockflow-kafka kafka-topics --bootstrap-server localhost:9092 --describe --topic market.normalized 2>/dev/null | head -1
+  echo "new metric count: $(curl -s localhost:8081/actuator/prometheus | grep -cE 'stockflow_stage_seconds|stockflow_consumer_lag')"
   ;;
 
 restore)
