@@ -61,3 +61,4 @@ backend/docs/*.md
 backend/perf/*.md
 !backend/perf/README.md
 !backend/perf/SERVER_TEST.md
+!backend/perf/GRAFANA_GAPS.md
