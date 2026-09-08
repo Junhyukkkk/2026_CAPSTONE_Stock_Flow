@@ -17,6 +17,16 @@
         .stock-row.sel { background: var(--accent); color:#07111a; }
         .stock-row.sel .muted, .stock-row.sel .up, .stock-row.sel .down { color:#07111a !important; }
         .pane-label { font-size:12px; color:var(--text-dim); margin:4px 0; }
+        .prediction-controls { display:flex; align-items:end; gap:10px; flex-wrap:wrap; }
+        .prediction-controls .field { margin:0; min-width:120px; }
+        .prediction-models { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:16px; }
+        .prediction-stat { border:1px solid var(--border); padding:14px; min-height:92px; border-radius:8px; }
+        .prediction-stat .model { font-weight:700; margin-bottom:8px; }
+        .prediction-stat .metric { color:var(--text-dim); font-size:12px; line-height:1.6; }
+        .prediction-legend { display:flex; gap:16px; flex-wrap:wrap; margin:12px 0; color:var(--text-dim); font-size:12px; }
+        .legend-swatch { width:10px; height:10px; display:inline-block; margin-right:5px; border-radius:2px; }
+        .prediction-table { overflow-x:auto; max-height:420px; overflow-y:auto; }
+        @media (max-width: 760px) { .prediction-models { grid-template-columns:1fr; } }
     </style>
 </head>
 <body>
@@ -84,6 +94,46 @@
             </div>
         </div>
     </div>
+
+    <div class="card mt-16 hidden" id="predictionCard">
+                <div class="flex-between">
+                    <div>
+                        <h3>예측 비교</h3>
+                        <div class="muted" id="predictionSymbol">종목을 선택하세요.</div>
+                    </div>
+                    <div class="prediction-controls">
+                        <div class="field">
+                            <label>주기</label>
+                            <select id="predictionInterval">
+                                <option value="1m">1분봉</option>
+                                <option value="1d">일봉</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label>예측 스텝</label>
+                            <select id="predictionHorizon">
+                                <option value="5">5스텝</option>
+                                <option value="10">10스텝</option>
+                                <option value="30" selected>30스텝</option>
+                            </select>
+                        </div>
+                        <button class="btn" id="predictionRun" onclick="runPrediction()">예측 실행</button>
+                    </div>
+                </div>
+
+                <div id="predictionResult" class="hidden">
+                    <div class="prediction-models" id="predictionModels"></div>
+                    <div class="prediction-legend" id="predictionLegend"></div>
+                    <div id="predictionChart" class="chart-box"></div>
+                    <div class="muted mt-16" id="predictionMeta"></div>
+                    <div class="prediction-table mt-16">
+                        <table>
+                            <thead id="predictionHead"></thead>
+                            <tbody id="predictionBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+    </div>
 </div>
 
 <script src="assets/api.js"></script>
@@ -94,6 +144,18 @@
     let selected = null;
     let stomp = null, liveSub = null;
     let charts = {};
+    let predictionChart = null;
+
+    const PREDICTION_COLORS = {
+        'ARIMA': '#00d4ff',
+        'Log-return ARIMA': '#26c281',
+        'Chronos-Bolt tiny': '#ff5e6c',
+    };
+    const PREDICTION_NAMES = {
+        'ARIMA': '가격 ARIMA',
+        'Log-return ARIMA': '로그수익률 ARIMA',
+        'Chronos-Bolt tiny': 'Chronos-Bolt tiny',
+    };
 
     // ---- 종목 목록 ----
     async function loadStocks() {
@@ -126,7 +188,108 @@
         renderList();
         history.replaceState(null, '', '?symbol=' + symbol);
         subscribeLive(symbol);
+        preparePrediction(symbol);
         await Promise.all([loadHeader(symbol), loadCharts(symbol)]);
+    }
+
+    function preparePrediction(symbol) {
+        document.getElementById('predictionCard').classList.remove('hidden');
+        document.getElementById('predictionSymbol').textContent = symbol;
+        document.getElementById('predictionResult').classList.add('hidden');
+        if (predictionChart) {
+            predictionChart.remove();
+            predictionChart = null;
+        }
+    }
+
+    async function runPrediction() {
+        if (!selected) return;
+        const interval = document.getElementById('predictionInterval').value;
+        const horizon = Number(document.getElementById('predictionHorizon').value);
+        const button = document.getElementById('predictionRun');
+        button.disabled = true;
+        button.textContent = '계산 중...';
+        try {
+            const result = await API.predictionCompare(selected, interval, horizon);
+            renderPrediction(result);
+            toast('예측 완료', 'ok');
+        } catch (e) {
+            toast('예측 실패: ' + e.message, 'err');
+        } finally {
+            button.disabled = false;
+            button.textContent = '예측 실행';
+        }
+    }
+
+    function renderPrediction(result) {
+        const models = result.models || [];
+        document.getElementById('predictionResult').classList.remove('hidden');
+        document.getElementById('predictionModels').innerHTML = models.map(model => {
+            const metrics = model.metrics;
+            const name = PREDICTION_NAMES[model.model] || model.model;
+            const order = model.order ? `${name} (${model.order.join(',')})` : name;
+            const metricText = metrics
+                ? `MAE ${fmtPrice(metrics.mae)}<br>RMSE ${fmtPrice(metrics.rmse)}`
+                : 'MAE -<br>RMSE -';
+            return `<div class="prediction-stat">
+                <div class="model" style="color:${PREDICTION_COLORS[model.model] || '#ffffff'}">${order}</div>
+                <div class="metric">${metricText}</div>
+            </div>`;
+        }).join('');
+
+        const legendItems = [
+            ['현재 종가', '#ffd43b'],
+            ...models.map(model => [PREDICTION_NAMES[model.model] || model.model,
+                PREDICTION_COLORS[model.model] || '#ffffff']),
+        ];
+        document.getElementById('predictionLegend').innerHTML = legendItems.map(([label, color]) =>
+            `<span><i class="legend-swatch" style="background:${color}"></i>${label}</span>`).join('');
+
+        if (predictionChart) predictionChart.remove();
+        const chartEl = document.getElementById('predictionChart');
+        chartEl.innerHTML = '';
+        predictionChart = LightweightCharts.createChart(chartEl, {
+            height: 360,
+            layout: { background: { color: 'transparent' }, textColor: '#8b92a8' },
+            grid: { vertLines: { color: '#2d3346' }, horzLines: { color: '#2d3346' } },
+            timeScale: { borderColor: '#2d3346', timeVisible: result.interval !== '1d', secondsVisible: false },
+            rightPriceScale: { borderColor: '#2d3346' },
+            crosshair: { mode: 0 },
+        });
+        const chartTime = (ts) => result.interval === '1d'
+            ? ts.slice(0, 10)
+            : Math.floor(new Date(ts).getTime() / 1000);
+        const lastTime = chartTime(result.last_ts);
+        models.forEach(model => {
+            const series = predictionChart.addLineSeries({
+                color: PREDICTION_COLORS[model.model] || '#ffffff',
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: true,
+            });
+            series.setData([
+                { time: lastTime, value: Number(result.last_value) },
+                ...(model.forecast || []).map(point => ({ time: chartTime(point.ts), value: Number(point.yhat) })),
+            ]);
+        });
+        const actual = predictionChart.addLineSeries({
+            color: '#ffd43b', lineWidth: 2, priceLineVisible: true, lastValueVisible: true,
+        });
+        actual.setData([{ time: lastTime, value: Number(result.last_value) }]);
+        predictionChart.timeScale().fitContent();
+
+        document.getElementById('predictionMeta').textContent =
+            `${result.symbol} · ${result.interval === '1d' ? '일봉' : '1분봉'} · ${result.horizon}스텝 · 마지막 실제가 ${fmtPrice(result.last_value)}`;
+        document.getElementById('predictionHead').innerHTML = `<tr><th>시각</th>${models
+            .map(model => `<th>${PREDICTION_NAMES[model.model] || model.model}</th>`).join('')}</tr>`;
+        const rowCount = Math.max(0, ...models.map(model => (model.forecast || []).length));
+        document.getElementById('predictionBody').innerHTML = Array.from({ length: rowCount }, (_, index) => {
+            const point = models.find(model => model.forecast && model.forecast[index])?.forecast[index];
+            const time = point ? new Date(point.ts).toLocaleString('ko-KR') : '-';
+            return `<tr><td>${time}</td>${models.map(model =>
+                `<td>${model.forecast && model.forecast[index] ? fmtPrice(model.forecast[index].yhat) : '-'}</td>`
+            ).join('')}</tr>`;
+        }).join('');
     }
 
     async function loadHeader(symbol) {
