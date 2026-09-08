@@ -1,0 +1,26 @@
+services:
+  analysis:
+    build: .
+    container_name: stockflow-analysis
+    ports:
+      - "8000:8000"
+    environment:
+      # infra_default 네트워크 내부의 TimescaleDB 컨테이너를 바라봄
+      DB_HOST: timescaledb
+      DB_PORT: "5432"
+      DB_NAME: stockflow
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      MODEL_DIR: /app/models
+      DEFAULT_INTERVAL: 1m
+    volumes:
+      - ./models:/app/models
+    networks:
+      - infra
+    restart: unless-stopped
+
+networks:
+  # backend/infra/docker-compose.yml 가 만든 네트워크에 합류
+  infra:
+    external: true
+    name: infra_default
