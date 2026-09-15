@@ -55,6 +55,21 @@ public class BacktestRunRepository {
                 symbol.toUpperCase(), Date.valueOf(from), Date.valueOf(to));
     }
 
+    /** 시작일 이전에 실제로 저장된 일봉 관측치 수를 반환한다. */
+    public int countBarsBefore(String symbol, String source, LocalDate from) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(DISTINCT trade_date)
+                FROM symbol_daily_ohlcv
+                WHERE symbol = ?
+                  AND trade_date < ?
+                  AND (? IS NULL OR source = ?)
+                """,
+                Integer.class,
+                symbol.toUpperCase(), Date.valueOf(from), source, source);
+        return count == null ? 0 : count;
+    }
+
     /**
      * 실행 결과 헤더와 체결/자산곡선을 한 트랜잭션으로 저장하고 run id 를 반환한다.
      */

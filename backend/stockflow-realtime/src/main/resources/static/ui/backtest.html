@@ -151,7 +151,12 @@
                         </select>
                     </div>
                     <div class="row">
-                        <div class="field"><label>최소 학습 일수</label><input type="number" data-param="warmup" value="50" min="30"></div>
+                        <div class="field">
+                            <label>최소 학습 일수</label>
+                            <input type="number" data-param="warmup" value="50" min="50" max="500"
+                                   oninput="validateWarmupInput(this)">
+                            <div class="hint" id="warmupHelp">최소 50개의 실제 일봉 데이터가 필요합니다.</div>
+                        </div>
                         <div class="field"><label>모델 갱신 주기(일)</label><input type="number" data-param="refitEvery" value="5" min="1" max="30"></div>
                     </div>
                     <div class="row">
@@ -177,15 +182,42 @@
         });
         return p;
     }
+    function validateWarmupInput(input, notify = false) {
+        const value = Number(input.value);
+        const invalid = !Number.isInteger(value) || value < 50;
+        const message = '최소 학습 일수는 50일 이상으로 입력해 주세요.';
+        input.setCustomValidity(invalid ? message : '');
+        const help = document.getElementById('warmupHelp');
+        if (help) {
+            help.textContent = invalid ? message : '최소 50개의 실제 일봉 데이터가 필요합니다.';
+            help.style.color = invalid ? 'var(--red)' : '';
+        }
+        if (invalid && notify) toast(message, 'err');
+        return !invalid;
+    }
+    function validatePredictionSettings() {
+        if (document.getElementById('strategyType').value !== 'PREDICTION') return true;
+        const input = document.querySelector('#paramFields [data-param="warmup"]');
+        if (input && !validateWarmupInput(input, true)) {
+            input.focus();
+            input.reportValidity();
+            return false;
+        }
+        return true;
+    }
     function hideComparison() {
         document.getElementById('comparison').classList.add('hidden');
         document.getElementById('comparisonBody').innerHTML = '';
     }
     function friendlyBacktestError(error) {
         const message = String(error?.message || error || '알 수 없는 오류');
-        const observations = message.match(/at least (\d+) observations are required before from_date/i);
+        const observations = message.match(/at least (\d+) observations are required before from_date(?:.*?found (\d+))?/i);
         if (observations) {
-            return `선택한 시작일 이전의 학습 데이터가 부족합니다. 최소 ${observations[1]}일의 과거 데이터가 필요하므로 시작일을 늦춰 주세요.`;
+            const actual = observations[2] ? ` 현재 사용 가능한 데이터는 ${observations[2]}개입니다.` : '';
+            return `선택한 시작일 이전의 학습 데이터가 부족합니다. 최소 ${observations[1]}개의 실제 일봉 데이터가 필요합니다.${actual} 시작일을 늦춰 주세요.`;
+        }
+        if (/warmup must be between 50 and 500/i.test(message)) {
+            return '최소 학습 일수는 50일 이상 500일 이하로 입력해 주세요.';
         }
         if (/insufficient history|학습.*부족|데이터가 부족/i.test(message)) {
             return '예측에 필요한 과거 데이터가 부족합니다. 시작일을 늦추거나 최소 학습 일수를 확인해 주세요.';
@@ -226,6 +258,7 @@
 
     // ---- 백테스트 실행 ----
     async function runBacktest() {
+        if (!validatePredictionSettings()) return;
         const body = buildRunBody();
         if (!body.symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
         hideComparison();
@@ -324,6 +357,7 @@
 
     let comparisonRuns = [];
     async function runComparison() {
+        if (!validatePredictionSettings()) return;
         const base = buildRunBody();
         if (!base.symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
         if (base.strategyType !== 'PREDICTION') {
@@ -407,6 +441,7 @@
 
     // ---- 전략 저장/목록 ----
     async function saveStrategy() {
+        if (!validatePredictionSettings()) return;
         const config = buildRunBody();
         const symbol = config.symbol;
         const type = config.strategyType;

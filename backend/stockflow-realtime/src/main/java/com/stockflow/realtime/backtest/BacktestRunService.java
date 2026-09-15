@@ -87,6 +87,13 @@ public class BacktestRunService {
             if (type == StrategyType.PREDICTION) {
                 PredictionBacktestConfig config = PredictionBacktestConfig.from(effectiveParams);
                 effectiveParams = config.asParams();
+                int historyCount = runRepository.countBarsBefore(symbol, config.source(), from);
+                if (historyCount < config.warmup()) {
+                    throw new IllegalArgumentException(
+                            "at least " + config.warmup()
+                                    + " observations are required before from_date"
+                                    + " (found " + historyCount + " actual daily observations)");
+                }
                 PredictionSignalResponse response = predictionService.backtestSignals(
                         config.toRequest(symbol, from, to));
                 Map<String, Object> predictionParams = new LinkedHashMap<>(config.asParams());

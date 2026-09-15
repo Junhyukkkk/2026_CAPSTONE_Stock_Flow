@@ -107,7 +107,7 @@ def generate_walk_forward_signals(
         raise ValueError(f"unsupported prediction model: {model}")
     if from_date > to_date:
         raise ValueError("from_date must be earlier than or equal to to_date")
-    if warmup < 30 or refit_every < 1 or max_history < warmup:
+    if warmup < 50 or refit_every < 1 or max_history < warmup:
         raise ValueError("invalid warmup, refit_every, or max_history")
 
     series = series.astype(float).sort_index()
@@ -125,7 +125,8 @@ def generate_walk_forward_signals(
     last_index = target_indices[-1]
     if first_index < warmup:
         raise ValueError(
-            f"at least {warmup} observations are required before from_date"
+            f"at least {warmup} observations are required before from_date "
+            f"(found {first_index} actual daily observations)"
         )
 
     round_trip_cost_pct = 2.0 * (fee_bps + slippage_bps) / 100.0

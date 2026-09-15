@@ -72,8 +72,8 @@ record PredictionBacktestConfig(
     }
 
     private void validate() {
-        if (warmup < 30 || warmup > 500) {
-            throw new IllegalArgumentException("warmup must be between 30 and 500");
+        if (warmup < 50 || warmup > 500) {
+            throw new IllegalArgumentException("warmup must be between 50 and 500");
         }
         if (refitEvery < 1 || refitEvery > 30) {
             throw new IllegalArgumentException("refitEvery must be between 1 and 30");

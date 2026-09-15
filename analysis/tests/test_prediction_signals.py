@@ -36,7 +36,7 @@ class PredictionSignalsTest(unittest.TestCase):
             model="ARIMA",
             from_date=date(2026, 2, 20),
             to_date=date(2026, 3, 1),
-            warmup=30,
+            warmup=50,
             refit_every=5,
             max_history=50,
             volatility_multiplier=0,
@@ -68,7 +68,7 @@ class PredictionSignalsTest(unittest.TestCase):
             model="ARIMA",
             from_date=business_index[50].date(),
             to_date=business_index[59].date(),
-            warmup=30,
+            warmup=50,
             require_consecutive_days=False,
             forecaster=lambda history, model, steps: np.repeat(history.iloc[-1], steps),
         )
@@ -83,7 +83,18 @@ class PredictionSignalsTest(unittest.TestCase):
                 model="ARIMA",
                 from_date=date(2026, 1, 20),
                 to_date=date(2026, 1, 25),
-                warmup=30,
+                warmup=50,
+                forecaster=lambda history, model, steps: np.ones(steps),
+            )
+
+    def test_warmup_below_minimum_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "invalid warmup"):
+            generate_walk_forward_signals(
+                self.series,
+                model="ARIMA",
+                from_date=date(2026, 3, 1),
+                to_date=date(2026, 3, 5),
+                warmup=49,
                 forecaster=lambda history, model, steps: np.ones(steps),
             )
 

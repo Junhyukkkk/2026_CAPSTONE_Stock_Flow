@@ -74,7 +74,7 @@ class PredictionSignalRequest(BaseModel):
     from_date: date
     to_date: date
     source: Optional[str] = "BINANCE"
-    warmup: int = Field(default=50, ge=30, le=500)
+    warmup: int = Field(default=50, ge=50, le=500)
     refit_every: int = Field(default=5, ge=1, le=30)
     max_history: int = Field(default=200, ge=50, le=2000)
     volatility_window: int = Field(default=20, ge=5, le=100)
