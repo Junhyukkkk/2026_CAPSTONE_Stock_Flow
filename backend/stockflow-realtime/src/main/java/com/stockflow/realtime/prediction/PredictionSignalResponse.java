@@ -12,6 +12,9 @@ public record PredictionSignalResponse(
         @JsonProperty("from_date") LocalDate fromDate,
         @JsonProperty("to_date") LocalDate toDate,
         @JsonProperty("signal_count") int signalCount,
+        @JsonProperty("buy_count") int buyCount,
+        @JsonProperty("hold_count") int holdCount,
+        @JsonProperty("sell_count") int sellCount,
         List<PredictionSignalPoint> signals
 ) {
     public record PredictionSignalPoint(

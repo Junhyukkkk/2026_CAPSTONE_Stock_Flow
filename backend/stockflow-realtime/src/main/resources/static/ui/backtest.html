@@ -38,7 +38,8 @@
                 <div class="field"><label>종료일</label><input type="date" id="to"></div>
             </div>
             <div class="flex">
-                <button class="btn" onclick="runBacktest()">▶ 백테스트 실행</button>
+                <button class="btn" id="runBtn" onclick="runBacktest()">백테스트 실행</button>
+                <button class="btn-ghost" id="compareBtn" onclick="runComparison()">모델 비교</button>
                 <button class="btn-ghost" onclick="saveStrategy()">전략 저장</button>
             </div>
         </div>
@@ -56,6 +57,19 @@
         </div>
     </div>
 
+    <div id="comparison" class="card mt-16 hidden">
+        <div class="flex-between">
+            <h3>동일 조건 성과 비교</h3>
+            <span class="muted" id="comparisonMeta"></span>
+        </div>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead><tr><th>전략</th><th>누적 수익률</th><th>MDD</th><th>최종 자산</th><th>BUY / HOLD / SELL</th><th>왕복거래</th><th></th></tr></thead>
+                <tbody id="comparisonBody"></tbody>
+            </table>
+        </div>
+    </div>
+
     <!-- 결과 -->
     <div id="result" class="hidden">
         <div class="grid grid-4 mt-16">
@@ -63,6 +77,11 @@
             <div class="card stat"><div class="label">CAGR</div><div class="value" id="rCagr">-</div></div>
             <div class="card stat"><div class="label">최대 낙폭 (MDD)</div><div class="value down" id="rMdd">-</div></div>
             <div class="card stat"><div class="label">승률 / 왕복거래</div><div class="value" id="rWin">-</div></div>
+        </div>
+
+        <div class="card mt-16">
+            <div class="flex-between"><h3>가격 및 체결</h3><span class="muted">BUY / SELL</span></div>
+            <div id="priceChart" class="chart-box"></div>
         </div>
 
         <div class="card mt-16">
@@ -119,7 +138,7 @@
                 </div>
                 <div class="row">
                     <div class="field"><label>변동성 계산 기간</label><input type="number" data-param="volatilityWindow" value="20" min="5"></div>
-                    <div class="field"><label>변동성 기준 계수</label><input type="number" data-param="volatilityMultiplier" value="0.5" min="0" max="5" step="0.1"></div>
+                    <div class="field"><label>변동성 기준 계수</label><input type="number" data-param="volatilityMultiplier" value="0.25" min="0" max="5" step="0.05"></div>
                 </div>
                 <div class="row">
                     <div class="field"><label>수수료(bp)</label><input type="number" data-param="feeBps" value="10" min="0" step="1"></div>
@@ -142,9 +161,8 @@
     }
     renderParams();
 
-    // ---- 백테스트 실행 ----
-    async function runBacktest() {
-        const body = {
+    function buildRunBody() {
+        return {
             symbol: document.getElementById('symbol').value.trim().toUpperCase(),
             strategyType: document.getElementById('strategyType').value,
             params: collectParams(),
@@ -152,16 +170,28 @@
             from: document.getElementById('from').value,
             to: document.getElementById('to').value,
         };
+    }
+
+    // ---- 백테스트 실행 ----
+    async function runBacktest() {
+        const body = buildRunBody();
         if (!body.symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
+        const button = document.getElementById('runBtn');
         try {
+            button.disabled = true;
+            button.textContent = '실행 중...';
             toast('백테스트 실행 중...');
             const run = await API.runAdHoc(body);
             await showResult(run);
             toast('백테스트 완료', 'ok');
         } catch (e) { toast('실행 실패: ' + e.message, 'err'); }
+        finally {
+            button.disabled = false;
+            button.textContent = '백테스트 실행';
+        }
     }
 
-    let eqChart = null, ddChart = null;
+    let eqChart = null, ddChart = null, priceChart = null;
     async function showResult(run) {
         document.getElementById('result').classList.remove('hidden');
         const tr = Number(run.totalReturnPct);
@@ -176,13 +206,43 @@
             `${run.fromDate} ~ ${run.toDate} · 초기 ${fmtNum(run.initialCash)} → 최종 ${fmtNum(run.finalEquity)} · ${run.barCount ?? 0} bars`
             + (run.strategyType === 'PREDICTION' ? ` · ${run.params?.model ?? ''}` : '');
 
+        const [curve, trades, prices] = await Promise.all([
+            API.equityCurve(run.id),
+            API.runTrades(run.id),
+            API.ohlcv(run.symbol, run.fromDate, run.toDate),
+        ]);
+
+        // 가격 및 실제 체결
+        if (priceChart) priceChart.remove();
+        const elP = document.getElementById('priceChart'); elP.innerHTML = '';
+        if (prices?.length) {
+            priceChart = LightweightCharts.createChart(elP, baseChartOpts(360));
+            const candles = priceChart.addCandlestickSeries({
+                upColor: '#20c997', downColor: '#ff5e6c',
+                wickUpColor: '#20c997', wickDownColor: '#ff5e6c',
+                borderVisible: false,
+            });
+            candles.setData(prices.map(p => ({
+                time: p.date, open: +p.open, high: +p.high, low: +p.low, close: +p.close,
+            })));
+            candles.setMarkers((trades || []).map(t => ({
+                time: t.tradeDate,
+                position: t.side === 'BUY' ? 'belowBar' : 'aboveBar',
+                color: t.side === 'BUY' ? '#20c997' : '#ff5e6c',
+                shape: t.side === 'BUY' ? 'arrowUp' : 'arrowDown',
+                text: t.side,
+            })));
+            priceChart.timeScale().fitContent();
+        } else {
+            elP.innerHTML = '<div class="spinner">가격 데이터가 없습니다.</div>';
+        }
+
         // 자산 곡선
-        const curve = await API.equityCurve(run.id) || [];
         if (eqChart) eqChart.remove();
         if (ddChart) ddChart.remove();
         const elE = document.getElementById('equityChart'); elE.innerHTML = '';
         const elD = document.getElementById('ddChart'); elD.innerHTML = '';
-        if (curve.length) {
+        if (curve?.length) {
             eqChart = LightweightCharts.createChart(elE, baseChartOpts(360));
             eqChart.addAreaSeries({ lineColor: '#00d4ff', topColor: '#00d4ff44', bottomColor: '#00d4ff00', lineWidth: 2 })
                 .setData(curve.map(p => ({ time: p.tradeDate, value: +p.equity })));
@@ -197,9 +257,8 @@
         }
 
         // 체결 내역
-        const trades = await API.runTrades(run.id) || [];
         const body = document.getElementById('tradeBody');
-        body.innerHTML = trades.length ? trades.map(t => `
+        body.innerHTML = trades?.length ? trades.map(t => `
             <tr>
                 <td>${t.seq}</td><td>${t.tradeDate}</td>
                 <td class="${t.side==='BUY'?'up':'down'}">${t.side}</td>
@@ -207,6 +266,74 @@
                 <td>${fmtNum(t.cashAfter)}</td><td>${fmtNum(t.equityAfter)}</td>
                 <td class="${signClass(t.pnlPct)}">${t.pnlPct != null ? fmtPct(t.pnlPct) : '-'}</td>
             </tr>`).join('') : '<tr><td colspan="8" class="muted center">체결 없음</td></tr>';
+    }
+
+    let comparisonRuns = [];
+    async function runComparison() {
+        const base = buildRunBody();
+        if (!base.symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
+
+        const compareButton = document.getElementById('compareBtn');
+        const runButton = document.getElementById('runBtn');
+        const predictionParams = { ...base.params };
+        const models = ['ARIMA', 'LOG_RETURN_ARIMA', 'CHRONOS_BOLT'];
+        comparisonRuns = [];
+        try {
+            compareButton.disabled = true;
+            runButton.disabled = true;
+            compareButton.textContent = '비교 중 0/4';
+            comparisonRuns.push(await API.runAdHoc({
+                ...base, strategyType: 'BUY_AND_HOLD', params: {},
+            }));
+            for (let i = 0; i < models.length; i++) {
+                compareButton.textContent = `비교 중 ${i + 2}/4`;
+                comparisonRuns.push(await API.runAdHoc({
+                    ...base,
+                    strategyType: 'PREDICTION',
+                    params: { ...predictionParams, model: models[i] },
+                }));
+            }
+            renderComparison();
+            toast('모델 비교 완료', 'ok');
+        } catch (e) {
+            toast('비교 실패: ' + e.message, 'err');
+        } finally {
+            compareButton.disabled = false;
+            runButton.disabled = false;
+            compareButton.textContent = '모델 비교';
+        }
+    }
+
+    function renderComparison() {
+        const labels = {
+            BUY_AND_HOLD: 'Buy & Hold',
+            ARIMA: '가격 ARIMA',
+            LOG_RETURN_ARIMA: '로그수익률 ARIMA',
+            CHRONOS_BOLT: 'Chronos-Bolt tiny',
+        };
+        document.getElementById('comparison').classList.remove('hidden');
+        document.getElementById('comparisonMeta').textContent =
+            `${comparisonRuns[0].symbol} · ${comparisonRuns[0].fromDate} ~ ${comparisonRuns[0].toDate}`;
+        document.getElementById('comparisonBody').innerHTML = comparisonRuns.map((run, index) => {
+            const key = run.strategyType === 'PREDICTION' ? run.params.model : run.strategyType;
+            const signals = run.strategyType === 'PREDICTION'
+                ? `${run.params.buySignalCount ?? 0} / ${run.params.holdSignalCount ?? 0} / ${run.params.sellSignalCount ?? 0}`
+                : '-';
+            return `<tr>
+                <td>${labels[key] ?? key}</td>
+                <td class="${signClass(run.totalReturnPct)}">${fmtPct(run.totalReturnPct)}</td>
+                <td>${fmtPct(run.mddPct)}</td>
+                <td>${fmtNum(run.finalEquity)}</td>
+                <td>${signals}</td>
+                <td>${run.tradeCount ?? 0}건</td>
+                <td><button class="btn-ghost btn-sm" onclick="showComparisonRun(${index})">보기</button></td>
+            </tr>`;
+        }).join('');
+    }
+
+    async function showComparisonRun(index) {
+        await showResult(comparisonRuns[index]);
+        document.getElementById('result').scrollIntoView({ behavior: 'smooth' });
     }
 
     function baseChartOpts(height) {

@@ -27,6 +27,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -88,6 +89,11 @@ public class BacktestRunService {
                 effectiveParams = config.asParams();
                 PredictionSignalResponse response = predictionService.backtestSignals(
                         config.toRequest(symbol, from, to));
+                Map<String, Object> predictionParams = new LinkedHashMap<>(config.asParams());
+                predictionParams.put("buySignalCount", response.buyCount());
+                predictionParams.put("holdSignalCount", response.holdCount());
+                predictionParams.put("sellSignalCount", response.sellCount());
+                effectiveParams = predictionParams;
                 signals = alignPredictionSignals(bars, response);
                 result = engine.run(bars, signals, initialCash, config.executionConfig());
             } else {
