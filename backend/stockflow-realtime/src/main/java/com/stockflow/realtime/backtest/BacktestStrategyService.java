@@ -60,7 +60,11 @@ public class BacktestStrategyService {
         if (req.getInitialCash() != null && req.getInitialCash().signum() <= 0) {
             throw new IllegalArgumentException("initialCash must be positive");
         }
-        StrategyFactory.create(type, req.getParams()); // 파라미터 검증(잘못된 값이면 예외)
+        if (type == StrategyType.PREDICTION) {
+            PredictionBacktestConfig.from(req.getParams());
+        } else {
+            StrategyFactory.create(type, req.getParams());
+        }
         return type;
     }
 

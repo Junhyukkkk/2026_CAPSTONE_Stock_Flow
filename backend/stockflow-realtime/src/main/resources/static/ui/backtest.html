@@ -381,14 +381,16 @@
 
     // ---- 전략 저장/목록 ----
     async function saveStrategy() {
-        const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-        const type = document.getElementById('strategyType').value;
+        const config = buildRunBody();
+        const symbol = config.symbol;
+        const type = config.strategyType;
+        if (!symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
         const body = {
             name: `${symbol}-${type}`,
             symbol,
             strategyType: type,
-            params: collectParams(),
-            initialCash: Number(document.getElementById('initialCash').value),
+            params: config.params,
+            initialCash: config.initialCash,
         };
         try {
             await API.createStrategy(body);
