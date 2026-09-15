@@ -46,7 +46,7 @@
             </div>
             <div class="flex">
                 <button class="btn" id="runBtn" onclick="runBacktest()">백테스트 실행</button>
-                <button class="btn-ghost" id="compareBtn" onclick="runComparison()">모델 비교</button>
+                <button class="btn-ghost" id="compareBtn" onclick="runComparison()">예측 모델 비교</button>
                 <button class="btn-ghost" onclick="saveStrategy()">전략 저장</button>
             </div>
         </div>
@@ -129,6 +129,7 @@
         const type = document.getElementById('strategyType').value;
         const defs = PARAM_DEFS[type];
         const el = document.getElementById('paramFields');
+        document.getElementById('compareBtn').classList.toggle('hidden', type !== 'PREDICTION');
         if (type === 'PREDICTION') {
             el.innerHTML = `
                 <div class="field">
@@ -282,6 +283,10 @@
     async function runComparison() {
         const base = buildRunBody();
         if (!base.symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
+        if (base.strategyType !== 'PREDICTION') {
+            toast('예측 모델 비교는 PREDICTION 전략에서 실행하세요', 'err');
+            return;
+        }
 
         const compareButton = document.getElementById('compareBtn');
         const runButton = document.getElementById('runBtn');
@@ -310,7 +315,7 @@
         } finally {
             compareButton.disabled = false;
             runButton.disabled = false;
-            compareButton.textContent = '모델 비교';
+            compareButton.textContent = '예측 모델 비교';
         }
     }
 
