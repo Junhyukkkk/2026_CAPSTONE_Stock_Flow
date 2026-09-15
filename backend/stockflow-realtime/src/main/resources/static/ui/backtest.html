@@ -127,6 +127,7 @@
         const type = document.getElementById('strategyType').value;
         const defs = PARAM_DEFS[type];
         const el = document.getElementById('paramFields');
+        hideComparison();
         document.getElementById('compareBtn').classList.toggle('hidden', type !== 'PREDICTION');
         document.getElementById('runBtn').textContent =
             type === 'PREDICTION' ? '선택 모델 실행' : '백테스트 실행';
@@ -176,6 +177,10 @@
         });
         return p;
     }
+    function hideComparison() {
+        document.getElementById('comparison').classList.add('hidden');
+        document.getElementById('comparisonBody').innerHTML = '';
+    }
     renderParams();
 
     function buildRunBody() {
@@ -197,6 +202,7 @@
     async function runBacktest() {
         const body = buildRunBody();
         if (!body.symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
+        hideComparison();
         const button = document.getElementById('runBtn');
         try {
             button.disabled = true;
