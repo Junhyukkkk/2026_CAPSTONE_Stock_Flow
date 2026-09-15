@@ -7,6 +7,7 @@ import pandas as pd
 from app.prediction_signals import (
     classify_signal,
     generate_walk_forward_signals,
+    validate_daily_series,
     validate_crypto_daily_series,
 )
 
@@ -56,6 +57,24 @@ class PredictionSignalsTest(unittest.TestCase):
         series = self.series.drop(self.series.index[10])
         with self.assertRaisesRegex(ValueError, "missing dates"):
             validate_crypto_daily_series(series)
+
+    def test_stock_trading_calendar_allows_weekend_gaps(self):
+        business_index = pd.bdate_range("2026-01-01", periods=70, tz="UTC")
+        stock_series = pd.Series(np.linspace(100.0, 120.0, 70), index=business_index)
+
+        validate_daily_series(stock_series, require_consecutive_days=False)
+        signals = generate_walk_forward_signals(
+            stock_series,
+            model="ARIMA",
+            from_date=business_index[50].date(),
+            to_date=business_index[59].date(),
+            warmup=30,
+            require_consecutive_days=False,
+            forecaster=lambda history, model, steps: np.repeat(history.iloc[-1], steps),
+        )
+
+        self.assertEqual(10, len(signals))
+        self.assertTrue(all(point["execution_date"].weekday() < 5 for point in signals))
 
     def test_insufficient_warmup_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "observations"):

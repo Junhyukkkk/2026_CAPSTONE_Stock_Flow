@@ -62,7 +62,9 @@ def classify_signal(expected_return_pct: float, threshold_pct: float) -> str:
     return "HOLD"
 
 
-def validate_crypto_daily_series(series: pd.Series) -> None:
+def validate_daily_series(
+    series: pd.Series, *, require_consecutive_days: bool = True
+) -> None:
     if series.empty:
         raise ValueError("daily close series is empty")
     if series.index.has_duplicates:
@@ -72,10 +74,16 @@ def validate_crypto_daily_series(series: pd.Series) -> None:
     if (series <= 0).any():
         raise ValueError("daily close prices must be positive")
 
-    normalized = pd.DatetimeIndex(series.index).normalize()
-    gaps = normalized.to_series().diff().dropna().dt.days
-    if not gaps.empty and int(gaps.max()) > 1:
-        raise ValueError("daily crypto series contains missing dates")
+    if require_consecutive_days:
+        normalized = pd.DatetimeIndex(series.index).normalize()
+        gaps = normalized.to_series().diff().dropna().dt.days
+        if not gaps.empty and int(gaps.max()) > 1:
+            raise ValueError("daily crypto series contains missing dates")
+
+
+def validate_crypto_daily_series(series: pd.Series) -> None:
+    """Backward-compatible strict validation for seven-day crypto markets."""
+    validate_daily_series(series, require_consecutive_days=True)
 
 
 def generate_walk_forward_signals(
@@ -91,6 +99,7 @@ def generate_walk_forward_signals(
     volatility_multiplier: float = 0.5,
     fee_bps: float = 10,
     slippage_bps: float = 5,
+    require_consecutive_days: bool = True,
     forecaster: Forecaster = forecast_prices,
 ) -> list[dict]:
     """Generate signals on prior closes for execution on subsequent daily bars."""
@@ -102,7 +111,9 @@ def generate_walk_forward_signals(
         raise ValueError("invalid warmup, refit_every, or max_history")
 
     series = series.astype(float).sort_index()
-    validate_crypto_daily_series(series)
+    validate_daily_series(
+        series, require_consecutive_days=require_consecutive_days
+    )
     dates = [timestamp.date() for timestamp in pd.DatetimeIndex(series.index)]
     target_indices = [
         index for index, day in enumerate(dates) if from_date <= day <= to_date

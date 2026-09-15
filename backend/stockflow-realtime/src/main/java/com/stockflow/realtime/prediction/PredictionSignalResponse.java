@@ -15,6 +15,10 @@ public record PredictionSignalResponse(
         @JsonProperty("buy_count") int buyCount,
         @JsonProperty("hold_count") int holdCount,
         @JsonProperty("sell_count") int sellCount,
+        BigDecimal mae,
+        BigDecimal rmse,
+        @JsonProperty("mae_pct") BigDecimal maePct,
+        @JsonProperty("rmse_pct") BigDecimal rmsePct,
         List<PredictionSignalPoint> signals
 ) {
     public record PredictionSignalPoint(

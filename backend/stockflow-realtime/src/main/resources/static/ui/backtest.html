@@ -21,6 +21,13 @@
                 <input type="text" id="symbol" placeholder="예: BTCUSDT" value="BTCUSDT">
             </div>
             <div class="field">
+                <label>데이터 소스</label>
+                <select id="source">
+                    <option value="BINANCE" selected>Binance (암호화폐)</option>
+                    <option value="ALPACA">Alpaca (미국 주식)</option>
+                </select>
+            </div>
+            <div class="field">
                 <label>전략 타입</label>
                 <select id="strategyType" onchange="renderParams()">
                     <option value="PREDICTION" selected>PREDICTION (예측 기반)</option>
@@ -64,7 +71,7 @@
         </div>
         <div style="overflow-x:auto;">
             <table>
-                <thead><tr><th>전략</th><th>누적 수익률</th><th>MDD</th><th>최종 자산</th><th>BUY / HOLD / SELL</th><th>왕복거래</th><th></th></tr></thead>
+                <thead><tr><th>전략</th><th>누적 수익률</th><th>MDD</th><th>MAE</th><th>RMSE</th><th>BUY / HOLD / SELL</th><th>왕복거래</th><th></th></tr></thead>
                 <tbody id="comparisonBody"></tbody>
             </table>
         </div>
@@ -144,8 +151,7 @@
                     <div class="field"><label>수수료(bp)</label><input type="number" data-param="feeBps" value="10" min="0" step="1"></div>
                     <div class="field"><label>슬리피지(bp)</label><input type="number" data-param="slippageBps" value="5" min="0" step="1"></div>
                 </div>
-                <input type="hidden" data-param="maxHistory" value="200">
-                <input type="hidden" data-param="source" data-param-type="string" value="BINANCE">`;
+                <input type="hidden" data-param="maxHistory" value="200">`;
             return;
         }
         if (!defs.length) { el.innerHTML = '<div class="hint" style="margin-bottom:14px;">파라미터 없음 (시작일 매수 → 종료일 평가)</div>'; return; }
@@ -162,10 +168,14 @@
     renderParams();
 
     function buildRunBody() {
+        const params = collectParams();
+        if (document.getElementById('strategyType').value === 'PREDICTION') {
+            params.source = document.getElementById('source').value;
+        }
         return {
             symbol: document.getElementById('symbol').value.trim().toUpperCase(),
             strategyType: document.getElementById('strategyType').value,
-            params: collectParams(),
+            params,
             initialCash: Number(document.getElementById('initialCash').value),
             from: document.getElementById('from').value,
             to: document.getElementById('to').value,
@@ -323,7 +333,8 @@
                 <td>${labels[key] ?? key}</td>
                 <td class="${signClass(run.totalReturnPct)}">${fmtPct(run.totalReturnPct)}</td>
                 <td>${fmtPct(run.mddPct)}</td>
-                <td>${fmtNum(run.finalEquity)}</td>
+                <td>${run.strategyType === 'PREDICTION' ? fmtPrice(run.params.mae) : '-'}</td>
+                <td>${run.strategyType === 'PREDICTION' ? fmtPrice(run.params.rmse) : '-'}</td>
                 <td>${signals}</td>
                 <td>${run.tradeCount ?? 0}건</td>
                 <td><button class="btn-ghost btn-sm" onclick="showComparisonRun(${index})">보기</button></td>

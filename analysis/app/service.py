@@ -20,7 +20,7 @@ def _load_clean(symbol: str, interval: str, source, limit: int):
     if df.empty:
         return None
     s = preprocess.to_close_series(df)
-    freq = preprocess.FREQ.get(interval, "1min")
+    freq = None if interval == "1d" and str(source).upper() == "ALPACA" else preprocess.FREQ.get(interval, "1min")
     s = preprocess.clean_series(s, freq=freq).dropna()
     return s
 
@@ -238,9 +238,23 @@ def prediction_signals(request):
         volatility_multiplier=request.volatility_multiplier,
         fee_bps=request.fee_bps,
         slippage_bps=request.slippage_bps,
+        require_consecutive_days=str(request.source).upper() == "BINANCE",
     )
     counts = {name: sum(point["signal"] == name for point in signals)
               for name in ("BUY", "HOLD", "SELL")}
+    actual_by_date = {
+        timestamp.date(): float(value)
+        for timestamp, value in series.items()
+    }
+    actual = pd.Series(
+        [actual_by_date[point["execution_date"]] for point in signals],
+        dtype=float,
+    )
+    predicted = pd.Series(
+        [point["predicted_price"] for point in signals], dtype=float
+    )
+    errors = predicted - actual
+    percentage_errors = errors / actual * 100.0
     return {
         "symbol": request.symbol,
         "model": request.model,
@@ -254,5 +268,9 @@ def prediction_signals(request):
         "buy_count": counts["BUY"],
         "hold_count": counts["HOLD"],
         "sell_count": counts["SELL"],
+        "mae": float(errors.abs().mean()),
+        "rmse": float((errors.pow(2).mean()) ** 0.5),
+        "mae_pct": float(percentage_errors.abs().mean()),
+        "rmse_pct": float((percentage_errors.pow(2).mean()) ** 0.5),
         "signals": signals,
     }

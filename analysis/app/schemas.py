@@ -106,4 +106,8 @@ class PredictionSignalResponse(BaseModel):
     buy_count: int
     hold_count: int
     sell_count: int
+    mae: float
+    rmse: float
+    mae_pct: float
+    rmse_pct: float
     signals: List[PredictionSignalPoint]

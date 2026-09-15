@@ -93,6 +93,10 @@ public class BacktestRunService {
                 predictionParams.put("buySignalCount", response.buyCount());
                 predictionParams.put("holdSignalCount", response.holdCount());
                 predictionParams.put("sellSignalCount", response.sellCount());
+                predictionParams.put("mae", response.mae());
+                predictionParams.put("rmse", response.rmse());
+                predictionParams.put("maePct", response.maePct());
+                predictionParams.put("rmsePct", response.rmsePct());
                 effectiveParams = predictionParams;
                 signals = alignPredictionSignals(bars, response);
                 result = engine.run(bars, signals, initialCash, config.executionConfig());
