@@ -61,6 +61,34 @@ public class PredictionService {
         }
     }
 
+    public PredictionSignalResponse backtestSignals(PredictionSignalRequest request) {
+        try {
+            PredictionSignalResponse response = client.post()
+                    .uri("/backtest/prediction-signals")
+                    .body(request)
+                    .retrieve()
+                    .body(PredictionSignalResponse.class);
+            if (response == null) {
+                throw new PredictionServiceException(
+                        HttpStatus.BAD_GATEWAY, "예측 서비스가 빈 신호 응답을 반환했습니다.");
+            }
+            return response;
+        } catch (HttpClientErrorException.NotFound e) {
+            throw new PredictionServiceException(
+                    HttpStatus.NOT_FOUND, "예측 백테스트에 필요한 일봉 데이터가 부족합니다.", e);
+        } catch (HttpClientErrorException e) {
+            if (e.getStatusCode().value() == 422) {
+                throw new IllegalArgumentException(
+                        "예측 신호 요청 조건이 올바르지 않습니다: " + e.getResponseBodyAsString(), e);
+            }
+            throw new PredictionServiceException(
+                    HttpStatus.BAD_GATEWAY, "예측 신호 응답을 처리하지 못했습니다.", e);
+        } catch (RestClientException e) {
+            throw new PredictionServiceException(
+                    HttpStatus.SERVICE_UNAVAILABLE, "예측 서비스에 연결할 수 없습니다.", e);
+        }
+    }
+
     public static class PredictionServiceException extends RuntimeException {
         private final HttpStatus status;
 

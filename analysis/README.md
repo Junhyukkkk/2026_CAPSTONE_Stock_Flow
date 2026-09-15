@@ -1,6 +1,6 @@
-# StockFlow Analysis Service (Python · FastAPI · ARIMA)
+# StockFlow Analysis Service (Python · FastAPI · Forecasting)
 
-OHLCV 시계열을 기반으로 **ARIMA 가격 예측**을 제공하는 독립 서비스다.
+OHLCV 시계열을 기반으로 **가격 ARIMA, 로그수익률 ARIMA, Chronos-Bolt 예측**을 제공하는 독립 서비스다.
 기술적 지표(MA·RSI·MACD·볼린저·ATR·OBV 등) 계산은 Spring 배치
 (`stockflow-realtime`의 `TechnicalIndicatorService`)에서 일원화하여 담당하므로,
 본 서비스는 **전처리 + 예측**에만 집중한다.
@@ -61,12 +61,35 @@ cp env.example .env          # 호스트 DB는 localhost:5433
 uvicorn app.main:app --reload --port 8000
 ```
 
+## Binance 일봉 누락 데이터 보완
+
+일봉 예측과 백테스트가 동일한 실제 캔들 데이터를 사용하도록 Binance 일봉 누락분을 확인할 수 있다. 기본 실행은 조회만 수행하며 기존 행을 수정하지 않는다.
+
+```bash
+python -m app.scripts.backfill_binance_daily \
+  --symbol BTCUSDT \
+  --from 2026-05-26 \
+  --to 2026-09-06
+```
+
+출력된 누락 날짜를 검토한 뒤 `--apply`를 추가하면 `(symbol, trade_date, source)` 기준으로 없는 행만 저장한다. 당일 UTC 캔들은 완료되지 않은 데이터이므로 입력할 수 없다.
+
+```bash
+python -m app.scripts.backfill_binance_daily \
+  --symbol BTCUSDT \
+  --from 2026-05-26 \
+  --to 2026-09-06 \
+  --apply
+```
+
 ## API
 
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/health` | 상태 확인 |
 | GET | `/predict/{symbol}?interval=1m&horizon=10&retrain=false` | 예측 (모델 없으면 즉석 학습) |
+| GET | `/predict/{symbol}/compare?interval=1d&horizon=10` | 세 모델 예측 비교 |
+| POST | `/backtest/prediction-signals` | 일봉 워크포워드 예측 신호 생성 |
 | POST | `/train/{symbol}?interval=1m&limit=2000` | 학습 후 저장 |
 | GET | `/models/{symbol}?interval=1m` | 저장 모델 메타데이터 |
 
@@ -96,4 +119,5 @@ curl "http://localhost:8000/predict/BTCUSDT?interval=1m&horizon=15"
 
 ## 비고
 - 차수 (p,d,q) 는 작은 격자에서 AIC 최소를 선택한다. 추후 `pmdarima.auto_arima` 로 교체 가능.
-- UI/프론트 연동, Spring Batch 재학습 트리거 연동은 다음 단계(미구현).
+- 예측 비교 UI와 Spring 백테스트 연동은 `stockflow-realtime`에서 제공한다.
+- Spring Batch 재학습 트리거 연동은 다음 단계다.

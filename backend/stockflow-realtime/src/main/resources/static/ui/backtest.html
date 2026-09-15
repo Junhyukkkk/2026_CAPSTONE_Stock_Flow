@@ -18,13 +18,14 @@
             <h3>전략 실행</h3>
             <div class="field">
                 <label>종목 심볼</label>
-                <input type="text" id="symbol" placeholder="예: AAPL" value="AAPL">
+                <input type="text" id="symbol" placeholder="예: BTCUSDT" value="BTCUSDT">
             </div>
             <div class="field">
                 <label>전략 타입</label>
                 <select id="strategyType" onchange="renderParams()">
+                    <option value="PREDICTION" selected>PREDICTION (예측 기반)</option>
                     <option value="BUY_AND_HOLD">BUY_AND_HOLD (매수 후 보유)</option>
-                    <option value="MA_CROSSOVER" selected>MA_CROSSOVER (이동평균 교차)</option>
+                    <option value="MA_CROSSOVER">MA_CROSSOVER (이동평균 교차)</option>
                     <option value="RSI">RSI (과매수/과매도)</option>
                 </select>
             </div>
@@ -61,7 +62,7 @@
             <div class="card stat"><div class="label">누적 수익률</div><div class="value" id="rTotal">-</div></div>
             <div class="card stat"><div class="label">CAGR</div><div class="value" id="rCagr">-</div></div>
             <div class="card stat"><div class="label">최대 낙폭 (MDD)</div><div class="value down" id="rMdd">-</div></div>
-            <div class="card stat"><div class="label">승률 / 체결수</div><div class="value" id="rWin">-</div></div>
+            <div class="card stat"><div class="label">승률 / 왕복거래</div><div class="value" id="rWin">-</div></div>
         </div>
 
         <div class="card mt-16">
@@ -88,26 +89,55 @@
 <script>
     renderNav('backtest.html');
 
-    document.getElementById('from').value = isoDaysAgo(365);
-    document.getElementById('to').value = todayIso();
+    document.getElementById('from').value = isoDaysAgo(62);
+    document.getElementById('to').value = isoDaysAgo(1);
 
     // ---- 전략 파라미터 동적 폼 ----
     const PARAM_DEFS = {
         BUY_AND_HOLD: [],
         MA_CROSSOVER: [['shortPeriod', '단기 기간', 5], ['longPeriod', '장기 기간', 20]],
         RSI: [['period', 'RSI 기간', 14], ['oversold', '과매도 기준', 30], ['overbought', '과매수 기준', 70]],
+        PREDICTION: [],
     };
     function renderParams() {
         const type = document.getElementById('strategyType').value;
         const defs = PARAM_DEFS[type];
         const el = document.getElementById('paramFields');
+        if (type === 'PREDICTION') {
+            el.innerHTML = `
+                <div class="field">
+                    <label>예측 모델</label>
+                    <select data-param="model" data-param-type="string">
+                        <option value="LOG_RETURN_ARIMA">로그수익률 ARIMA</option>
+                        <option value="ARIMA">가격 ARIMA</option>
+                        <option value="CHRONOS_BOLT">Chronos-Bolt tiny</option>
+                    </select>
+                </div>
+                <div class="row">
+                    <div class="field"><label>최소 학습 일수</label><input type="number" data-param="warmup" value="50" min="30"></div>
+                    <div class="field"><label>모델 갱신 주기(일)</label><input type="number" data-param="refitEvery" value="5" min="1" max="30"></div>
+                </div>
+                <div class="row">
+                    <div class="field"><label>변동성 계산 기간</label><input type="number" data-param="volatilityWindow" value="20" min="5"></div>
+                    <div class="field"><label>변동성 기준 계수</label><input type="number" data-param="volatilityMultiplier" value="0.5" min="0" max="5" step="0.1"></div>
+                </div>
+                <div class="row">
+                    <div class="field"><label>수수료(bp)</label><input type="number" data-param="feeBps" value="10" min="0" step="1"></div>
+                    <div class="field"><label>슬리피지(bp)</label><input type="number" data-param="slippageBps" value="5" min="0" step="1"></div>
+                </div>
+                <input type="hidden" data-param="maxHistory" value="200">
+                <input type="hidden" data-param="source" data-param-type="string" value="BINANCE">`;
+            return;
+        }
         if (!defs.length) { el.innerHTML = '<div class="hint" style="margin-bottom:14px;">파라미터 없음 (시작일 매수 → 종료일 평가)</div>'; return; }
         el.innerHTML = '<div class="row">' + defs.map(([k, label, def]) =>
             `<div class="field"><label>${label}</label><input type="number" data-param="${k}" value="${def}"></div>`).join('') + '</div>';
     }
     function collectParams() {
         const p = {};
-        document.querySelectorAll('#paramFields [data-param]').forEach(i => p[i.dataset.param] = Number(i.value));
+        document.querySelectorAll('#paramFields [data-param]').forEach(i => {
+            p[i.dataset.param] = i.dataset.paramType === 'string' ? i.value : Number(i.value);
+        });
         return p;
     }
     renderParams();
@@ -139,10 +169,12 @@
         document.getElementById('rTotal').className = 'value ' + signClass(tr);
         document.getElementById('rCagr').textContent = fmtPct(run.cagrPct);
         document.getElementById('rMdd').textContent = fmtPct(run.mddPct);
-        document.getElementById('rWin').textContent = `${fmtNum(run.winRatePct)}% / ${run.tradeCount ?? 0}건`;
+        document.getElementById('rWin').textContent =
+            `${run.winRatePct != null ? fmtNum(run.winRatePct) + '%' : '-'} / ${run.tradeCount ?? 0}건`;
         document.getElementById('resultTitle').textContent = `${run.symbol} · ${run.strategyType}`;
         document.getElementById('resultMeta').textContent =
-            `${run.fromDate} ~ ${run.toDate} · 초기 ${fmtNum(run.initialCash)} → 최종 ${fmtNum(run.finalEquity)} · ${run.barCount ?? 0} bars`;
+            `${run.fromDate} ~ ${run.toDate} · 초기 ${fmtNum(run.initialCash)} → 최종 ${fmtNum(run.finalEquity)} · ${run.barCount ?? 0} bars`
+            + (run.strategyType === 'PREDICTION' ? ` · ${run.params?.model ?? ''}` : '');
 
         // 자산 곡선
         const curve = await API.equityCurve(run.id) || [];

@@ -27,6 +27,16 @@ class BacktestEngineTest {
         return new Bar(date, c, c, c, c, BigDecimal.ONE);
     }
 
+    private static Bar bar(LocalDate date, double open, double close) {
+        return new Bar(
+                date,
+                BigDecimal.valueOf(open),
+                BigDecimal.valueOf(Math.max(open, close)),
+                BigDecimal.valueOf(Math.min(open, close)),
+                BigDecimal.valueOf(close),
+                BigDecimal.ONE);
+    }
+
     private static List<Bar> bars(double... closes) {
         List<Bar> bars = new ArrayList<>();
         LocalDate d = LocalDate.of(2025, 1, 1);
@@ -79,6 +89,43 @@ class BacktestEngineTest {
         assertThat(result.finalEquity()).isEqualByComparingTo("1200");
         assertThat(result.trades()).hasSize(2);
         assertThat(result.trades().get(1).pnlPct()).isEqualByComparingTo("20");
+    }
+
+    @Test
+    void predictionExecution_usesOpenPrice() {
+        List<Bar> bars = List.of(
+                bar(LocalDate.of(2025, 1, 1), 100, 150),
+                bar(LocalDate.of(2025, 1, 2), 200, 200));
+
+        BacktestResult result = engine.run(
+                bars,
+                List.of(Signal.BUY, Signal.SELL),
+                BigDecimal.valueOf(1000),
+                BacktestEngine.ExecutionConfig.atOpenWithCosts(
+                        BigDecimal.ZERO, BigDecimal.ZERO));
+
+        assertThat(result.finalEquity()).isEqualByComparingTo("2000");
+        assertThat(result.trades().get(0).price()).isEqualByComparingTo("100");
+        assertThat(result.trades().get(1).price()).isEqualByComparingTo("200");
+    }
+
+    @Test
+    void predictionExecution_deductsFeesAndSlippage() {
+        List<Bar> bars = List.of(
+                bar(LocalDate.of(2025, 1, 1), 100, 100),
+                bar(LocalDate.of(2025, 1, 2), 100, 100));
+
+        BacktestResult result = engine.run(
+                bars,
+                List.of(Signal.BUY, Signal.SELL),
+                BigDecimal.valueOf(1000),
+                BacktestEngine.ExecutionConfig.atOpenWithCosts(
+                        BigDecimal.valueOf(100), BigDecimal.valueOf(100)));
+
+        assertThat(result.finalEquity()).isLessThan(BigDecimal.valueOf(1000));
+        assertThat(result.trades().get(0).price()).isEqualByComparingTo("101");
+        assertThat(result.trades().get(1).price()).isEqualByComparingTo("99");
+        assertThat(result.trades().get(1).pnlPct()).isNegative();
     }
 
     @Test

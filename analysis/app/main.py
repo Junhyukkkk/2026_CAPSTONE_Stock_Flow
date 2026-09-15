@@ -11,7 +11,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import service
 from .config import settings
-from .schemas import ComparePredictResponse, ModelInfo, PredictResponse, TrainResponse
+from .schemas import (
+    ComparePredictResponse,
+    ModelInfo,
+    PredictionSignalRequest,
+    PredictionSignalResponse,
+    PredictResponse,
+    TrainResponse,
+)
 
 app = FastAPI(
     title="StockFlow Analysis Service",
@@ -96,3 +103,17 @@ def model_info(
     if info is None:
         raise HTTPException(status_code=404, detail="저장된 모델이 없습니다.")
     return info
+
+
+@app.post("/backtest/prediction-signals", response_model=PredictionSignalResponse)
+def create_prediction_signals(request: PredictionSignalRequest):
+    try:
+        result = service.prediction_signals(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"'{request.symbol}' 일봉 데이터를 찾을 수 없습니다.",
+        )
+    return result

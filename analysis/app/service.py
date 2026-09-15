@@ -10,6 +10,7 @@ from .model.arima import fit_arima, forecast as arima_forecast
 from .model.chronos_bolt import forecast as chronos_forecast
 from .model.log_return_arima import backtest_holdout as log_return_backtest_holdout
 from .model.log_return_arima import forecast as log_return_forecast
+from .prediction_signals import generate_walk_forward_signals
 
 MIN_OBS = 50  # ARIMA 학습 최소 관측치
 
@@ -209,4 +210,49 @@ def model_info(symbol: str, interval: str = "1m"):
         "trained_at": payload["trained_at"],
         "last_ts": payload["last_ts"],
         "n_obs": payload["n_obs"],
+    }
+
+
+def prediction_signals(request):
+    """Generate leakage-safe daily prediction signals for backtesting."""
+    df = db.load_ohlcv(
+        request.symbol,
+        interval="1d",
+        source=request.source,
+        limit=request.max_history + request.warmup + 1000,
+    )
+    if df.empty:
+        return None
+
+    series = preprocess.to_close_series(df)
+    series = series[series.index.date <= request.to_date]
+    signals = generate_walk_forward_signals(
+        series,
+        model=request.model,
+        from_date=request.from_date,
+        to_date=request.to_date,
+        warmup=request.warmup,
+        refit_every=request.refit_every,
+        max_history=request.max_history,
+        volatility_window=request.volatility_window,
+        volatility_multiplier=request.volatility_multiplier,
+        fee_bps=request.fee_bps,
+        slippage_bps=request.slippage_bps,
+    )
+    counts = {name: sum(point["signal"] == name for point in signals)
+              for name in ("BUY", "HOLD", "SELL")}
+    return {
+        "symbol": request.symbol,
+        "model": request.model,
+        "from_date": request.from_date,
+        "to_date": request.to_date,
+        "warmup": request.warmup,
+        "refit_every": request.refit_every,
+        "fee_bps": request.fee_bps,
+        "slippage_bps": request.slippage_bps,
+        "signal_count": len(signals),
+        "buy_count": counts["BUY"],
+        "hold_count": counts["HOLD"],
+        "sell_count": counts["SELL"],
+        "signals": signals,
     }

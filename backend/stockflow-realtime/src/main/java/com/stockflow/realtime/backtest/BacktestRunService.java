@@ -17,6 +17,8 @@ import com.stockflow.realtime.backtest.repository.BacktestRunRepository.RunRow;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository.TradeRow;
 import com.stockflow.realtime.backtest.repository.BacktestStrategyRepository;
 import com.stockflow.realtime.backtest.repository.BacktestStrategyRepository.StrategyRow;
+import com.stockflow.realtime.prediction.PredictionService;
+import com.stockflow.realtime.prediction.PredictionSignalResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -39,6 +42,7 @@ public class BacktestRunService {
     private final BacktestStrategyRepository strategyRepository;
     private final BacktestRunRepository runRepository;
     private final BacktestEngine engine;
+    private final PredictionService predictionService;
 
     /** 저장된 전략으로 백테스트 실행. */
     @Transactional
@@ -75,21 +79,59 @@ public class BacktestRunService {
                     "No daily OHLCV data for symbol=" + symbol + " in range " + from + ".." + to);
         }
 
+        Map<String, Object> effectiveParams = params == null ? Map.of() : params;
         try {
-            TradingStrategy strategy = StrategyFactory.create(type, params);
-            List<Signal> signals = strategy.generateSignals(bars);
-            BacktestResult result = engine.run(bars, signals, initialCash);
+            List<Signal> signals;
+            BacktestResult result;
+            if (type == StrategyType.PREDICTION) {
+                PredictionBacktestConfig config = PredictionBacktestConfig.from(effectiveParams);
+                effectiveParams = config.asParams();
+                PredictionSignalResponse response = predictionService.backtestSignals(
+                        config.toRequest(symbol, from, to));
+                signals = alignPredictionSignals(bars, response);
+                result = engine.run(bars, signals, initialCash, config.executionConfig());
+            } else {
+                TradingStrategy strategy = StrategyFactory.create(type, effectiveParams);
+                signals = strategy.generateSignals(bars);
+                result = engine.run(bars, signals, initialCash);
+            }
             long runId = runRepository.saveResult(
-                    strategyId, symbol, type.name(), params, from, to, result);
+                    strategyId, symbol, type.name(), effectiveParams, from, to, result);
             return runRepository.findRun(runId).map(this::toRunResponse).orElseThrow();
         } catch (NoDataException e) {
             throw e;
         } catch (RuntimeException e) {
             // 예기치 못한 실패도 추적할 수 있도록 FAILED 로 기록 후 재던짐
-            runRepository.saveFailure(strategyId, symbol, type.name(), params, from, to,
+            runRepository.saveFailure(strategyId, symbol, type.name(), effectiveParams, from, to,
                     initialCash, e.getMessage());
             throw e;
         }
+    }
+
+    private List<Signal> alignPredictionSignals(
+            List<Bar> bars, PredictionSignalResponse response) {
+        if (response.signals() == null) {
+            throw new IllegalStateException("Prediction service returned no signals");
+        }
+        Map<LocalDate, Signal> byExecutionDate = new HashMap<>();
+        for (PredictionSignalResponse.PredictionSignalPoint point : response.signals()) {
+            Signal previous = byExecutionDate.put(
+                    point.executionDate(), Signal.valueOf(point.signal().toUpperCase()));
+            if (previous != null) {
+                throw new IllegalStateException(
+                        "Duplicate prediction signal date: " + point.executionDate());
+            }
+        }
+        return bars.stream()
+                .map(bar -> {
+                    Signal signal = byExecutionDate.get(bar.date());
+                    if (signal == null) {
+                        throw new IllegalStateException(
+                                "Missing prediction signal for execution date: " + bar.date());
+                    }
+                    return signal;
+                })
+                .toList();
     }
 
     public Optional<BacktestRunResponse> getRun(long runId) {
