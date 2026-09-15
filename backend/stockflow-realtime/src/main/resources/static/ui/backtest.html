@@ -56,8 +56,8 @@
                 <button class="btn-ghost btn-sm" onclick="loadStrategies()">새로고침</button>
             </div>
             <table>
-                <thead><tr><th>이름</th><th>심볼</th><th>타입</th><th></th></tr></thead>
-                <tbody id="strategyBody"><tr><td colspan="4" class="spinner">불러오는 중...</td></tr></tbody>
+                <thead><tr><th>이름</th><th>심볼</th><th>타입</th><th>모델</th><th></th></tr></thead>
+                <tbody id="strategyBody"><tr><td colspan="5" class="spinner">불러오는 중...</td></tr></tbody>
             </table>
         </div>
     </div>
@@ -181,6 +181,32 @@
         document.getElementById('comparison').classList.add('hidden');
         document.getElementById('comparisonBody').innerHTML = '';
     }
+    function friendlyBacktestError(error) {
+        const message = String(error?.message || error || '알 수 없는 오류');
+        const observations = message.match(/at least (\d+) observations are required before from_date/i);
+        if (observations) {
+            return `선택한 시작일 이전의 학습 데이터가 부족합니다. 최소 ${observations[1]}일의 과거 데이터가 필요하므로 시작일을 늦춰 주세요.`;
+        }
+        if (/insufficient history|학습.*부족|데이터가 부족/i.test(message)) {
+            return '예측에 필요한 과거 데이터가 부족합니다. 시작일을 늦추거나 최소 학습 일수를 확인해 주세요.';
+        }
+        if (/missing dates/i.test(message)) {
+            return '선택한 구간의 일봉 데이터가 중간에 누락되어 있습니다. 데이터 보완 후 다시 실행해 주세요.';
+        }
+        if (/No daily OHLCV data|일봉 데이터를 찾을 수 없습니다|no daily bars/i.test(message)) {
+            return '선택한 종목과 기간에 사용할 수 있는 일봉 데이터가 없습니다.';
+        }
+        if (/from.*(?:earlier|<=)|시작일/i.test(message) && /to|종료일/i.test(message)) {
+            return '시작일은 종료일보다 빠르거나 같아야 합니다.';
+        }
+        if (/Failed to fetch|연결할 수 없습니다|Service Unavailable/i.test(message)) {
+            return '백테스트 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.';
+        }
+        if (error?.status === 404) {
+            return '저장된 전략을 찾을 수 없습니다. 목록을 새로고침한 뒤 다시 시도해 주세요.';
+        }
+        return message;
+    }
     renderParams();
 
     function buildRunBody() {
@@ -211,7 +237,7 @@
             const run = await API.runAdHoc(body);
             await showResult(run);
             toast('백테스트 완료', 'ok');
-        } catch (e) { toast('실행 실패: ' + e.message, 'err'); }
+        } catch (e) { toast('실행 실패: ' + friendlyBacktestError(e), 'err'); }
         finally {
             button.disabled = false;
             button.textContent = body.strategyType === 'PREDICTION'
@@ -328,7 +354,7 @@
             renderComparison();
             toast('모델 비교 완료', 'ok');
         } catch (e) {
-            toast('비교 실패: ' + e.message, 'err');
+            toast('비교 실패: ' + friendlyBacktestError(e), 'err');
         } finally {
             compareButton.disabled = false;
             runButton.disabled = false;
@@ -386,7 +412,8 @@
         const type = config.strategyType;
         if (!symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
         const body = {
-            name: `${symbol}-${type}`,
+            name: type === 'PREDICTION'
+                ? `${symbol}-${config.params.model}` : `${symbol}-${type}`,
             symbol,
             strategyType: type,
             params: config.params,
@@ -396,7 +423,7 @@
             await API.createStrategy(body);
             toast('전략 저장됨', 'ok');
             loadStrategies();
-        } catch (e) { toast('저장 실패: ' + e.message, 'err'); }
+        } catch (e) { toast('저장 실패: ' + friendlyBacktestError(e), 'err'); }
     }
 
     async function loadStrategies() {
@@ -406,12 +433,13 @@
             body.innerHTML = list.length ? list.map(s => `
                 <tr>
                     <td>${s.name}</td><td>${s.symbol}</td><td>${s.strategyType}</td>
+                    <td>${s.strategyType === 'PREDICTION' ? (s.params?.model ?? '-') : '-'}</td>
                     <td style="white-space:nowrap;">
                         <button class="btn btn-sm" onclick="runSaved(${s.id})">실행</button>
                         <button class="btn-danger btn-sm" onclick="delStrategy(${s.id})">삭제</button>
                     </td>
-                </tr>`).join('') : '<tr><td colspan="4" class="muted center">저장된 전략 없음</td></tr>';
-        } catch (e) { toast('전략 목록 조회 실패: ' + e.message, 'err'); }
+                </tr>`).join('') : '<tr><td colspan="5" class="muted center">저장된 전략 없음</td></tr>';
+        } catch (e) { toast('전략 목록 조회 실패: ' + friendlyBacktestError(e), 'err'); }
     }
 
     async function runSaved(id) {
@@ -421,7 +449,7 @@
             await showResult(run);
             window.scrollTo({ top: document.getElementById('result').offsetTop, behavior: 'smooth' });
             toast('실행 완료', 'ok');
-        } catch (e) { toast('실행 실패: ' + e.message, 'err'); }
+        } catch (e) { toast('실행 실패: ' + friendlyBacktestError(e), 'err'); }
     }
 
     async function delStrategy(id) {

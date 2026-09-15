@@ -1,10 +1,24 @@
 /* StockFlow 프론트엔드 공통 유틸 + API 래퍼 */
 
+async function apiError(res) {
+    const raw = await res.text();
+    let message = raw;
+    try {
+        const payload = JSON.parse(raw);
+        message = payload.detail || payload.message || payload.title || raw;
+    } catch (_) {
+        // Plain-text error responses are already usable.
+    }
+    const error = new Error(message || `요청 처리에 실패했습니다. (${res.status})`);
+    error.status = res.status;
+    return error;
+}
+
 const API = {
     async get(path) {
         const res = await fetch(path, { headers: { 'Accept': 'application/json' } });
         if (res.status === 404) return null;
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        if (!res.ok) throw await apiError(res);
         return res.json();
     },
     async post(path, body) {
@@ -13,7 +27,7 @@ const API = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
-        if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+        if (!res.ok) throw await apiError(res);
         return res.status === 204 ? null : res.json();
     },
     async del(path) {
