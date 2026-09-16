@@ -10,6 +10,13 @@
         .advanced-settings { margin: 4px 0 14px; border-top: 1px solid var(--border); padding-top: 10px; }
         .advanced-settings summary { cursor: pointer; color: var(--muted); font-weight: 600; }
         .advanced-settings[open] summary { margin-bottom: 12px; }
+        .chart-legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 12px; }
+        .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+        .legend-line { width: 18px; border-top: 2px solid; }
+        .legend-candle { width: 10px; height: 12px; border: 1px solid #20c997; background: #20c99755; }
+        .signal-buy { color: var(--green); font-weight: 700; }
+        .signal-sell { color: var(--red); font-weight: 700; }
+        .signal-hold { color: var(--muted); font-weight: 700; }
     </style>
 </head>
 <body>
@@ -85,8 +92,24 @@
         </div>
 
         <div class="card mt-16">
-            <div class="flex-between"><h3>가격 및 체결</h3><span class="muted">BUY / SELL</span></div>
+            <div class="flex-between">
+                <h3>가격 및 체결</h3>
+                <div id="priceLegend" class="chart-legend"><span class="muted">BUY / SELL</span></div>
+            </div>
             <div id="priceChart" class="chart-box"></div>
+        </div>
+
+        <div id="predictionAnalysis" class="card mt-16 hidden">
+            <div class="flex-between">
+                <h3>예측 분석</h3>
+                <span class="muted" id="predictionAnalysisMeta"></span>
+            </div>
+            <div style="max-height:360px; overflow-y:auto;">
+                <table>
+                    <thead><tr><th>신호일</th><th>실행일</th><th>실제 종가</th><th>예측 종가</th><th>예측 오차</th><th>예상 수익률</th><th>판단 기준</th><th>신호</th></tr></thead>
+                    <tbody id="predictionAnalysisBody"></tbody>
+                </table>
+            </div>
         </div>
 
         <div class="card mt-16">
@@ -287,15 +310,23 @@
             `${run.fromDate} ~ ${run.toDate} · 초기 ${fmtNum(run.initialCash)} → 최종 ${fmtNum(run.finalEquity)} · ${run.barCount ?? 0} bars`
             + (run.strategyType === 'PREDICTION' ? ` · ${run.params?.model ?? ''}` : '');
 
-        const [curve, trades, prices] = await Promise.all([
+        const [curve, trades, prices, predictionPoints] = await Promise.all([
             API.equityCurve(run.id),
             API.runTrades(run.id),
             API.ohlcv(run.symbol, run.fromDate, run.toDate),
+            run.strategyType === 'PREDICTION'
+                ? API.predictionPoints(run.id)
+                : Promise.resolve([]),
         ]);
-
         // 가격 및 실제 체결
         if (priceChart) priceChart.remove();
         const elP = document.getElementById('priceChart'); elP.innerHTML = '';
+        const priceLegend = document.getElementById('priceLegend');
+        priceLegend.innerHTML = predictionPoints?.length
+            ? `<span class="legend-item"><span class="legend-candle"></span>실제 일봉</span>
+               <span class="legend-item"><span class="legend-line" style="border-color:#ffd166"></span>예측 종가</span>
+               <span class="muted">BUY / SELL은 실제 가상 체결일</span>`
+            : '<span class="muted">BUY / SELL</span>';
         if (prices?.length) {
             priceChart = LightweightCharts.createChart(elP, baseChartOpts(360));
             const candles = priceChart.addCandlestickSeries({
@@ -313,10 +344,21 @@
                 shape: t.side === 'BUY' ? 'arrowUp' : 'arrowDown',
                 text: t.side,
             })));
+            if (predictionPoints?.length) {
+                const predictionLine = priceChart.addLineSeries({
+                    color: '#ffd166', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid,
+                    priceLineVisible: false, lastValueVisible: false,
+                });
+                predictionLine.setData(predictionPoints.map(point => ({
+                    time: point.executionDate, value: +point.predictedPrice,
+                })));
+            }
             priceChart.timeScale().fitContent();
         } else {
             elP.innerHTML = '<div class="spinner">가격 데이터가 없습니다.</div>';
         }
+
+        renderPredictionAnalysis(run, prices, predictionPoints);
 
         // 자산 곡선
         if (eqChart) eqChart.remove();
@@ -347,6 +389,38 @@
                 <td>${fmtNum(t.cashAfter)}</td><td>${fmtNum(t.equityAfter)}</td>
                 <td class="${signClass(t.pnlPct)}">${t.pnlPct != null ? fmtPct(t.pnlPct) : '-'}</td>
             </tr>`).join('') : '<tr><td colspan="8" class="muted center">체결 없음</td></tr>';
+    }
+
+    function renderPredictionAnalysis(run, prices, points) {
+        const section = document.getElementById('predictionAnalysis');
+        const body = document.getElementById('predictionAnalysisBody');
+        if (run.strategyType !== 'PREDICTION' || !points?.length) {
+            section.classList.add('hidden');
+            body.innerHTML = '';
+            return;
+        }
+
+        const actualCloseByDate = new Map((prices || []).map(price => [price.date, Number(price.close)]));
+        document.getElementById('predictionAnalysisMeta').textContent =
+            `${run.params?.model ?? 'PREDICTION'} · 예측 종가와 실행일 실제 종가 비교`;
+        body.innerHTML = points.map(point => {
+            const actualClose = actualCloseByDate.get(point.executionDate);
+            const errorPct = actualClose == null
+                ? null
+                : ((Number(point.predictedPrice) / actualClose) - 1) * 100;
+            const signalClass = point.signal === 'BUY'
+                ? 'signal-buy'
+                : point.signal === 'SELL' ? 'signal-sell' : 'signal-hold';
+            return `<tr>
+                <td>${point.signalDate}</td><td>${point.executionDate}</td>
+                <td>${fmtPrice(actualClose)}</td><td>${fmtPrice(point.predictedPrice)}</td>
+                <td class="${signClass(errorPct)}">${fmtPct(errorPct)}</td>
+                <td class="${signClass(point.expectedReturnPct)}">${fmtPct(point.expectedReturnPct)}</td>
+                <td>${fmtPct(point.thresholdPct)}</td>
+                <td class="${signalClass}">${point.signal}</td>
+            </tr>`;
+        }).join('');
+        section.classList.remove('hidden');
     }
 
     let comparisonRuns = [];

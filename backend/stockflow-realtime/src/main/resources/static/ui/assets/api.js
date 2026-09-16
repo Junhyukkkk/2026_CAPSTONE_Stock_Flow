@@ -60,6 +60,7 @@ const API = {
         API.post(`/api/backtest/strategies/${id}/run?from=${from}&to=${to}`, {}),
     runTrades: (runId) => API.get(`/api/backtest/runs/${runId}/trades`),
     equityCurve: (runId) => API.get(`/api/backtest/runs/${runId}/equity-curve`),
+    predictionPoints: (runId) => API.get(`/api/backtest/runs/${runId}/prediction-points`),
     predictionCompare: (symbol, interval, horizon) =>
         API.get(`/api/predictions/${encodeURIComponent(symbol)}/compare?interval=${interval}&horizon=${horizon}`),
 };
