@@ -3,6 +3,8 @@ package com.stockflow.realtime.backtest;
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
 import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
+import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
+import com.stockflow.realtime.backtest.dto.PerformanceReportResponse;
 import com.stockflow.realtime.backtest.dto.RunRequest;
 import com.stockflow.realtime.backtest.dto.StrategyRequest;
 import com.stockflow.realtime.backtest.dto.StrategyResponse;
@@ -91,6 +93,14 @@ public class BacktestController {
             description = "전략을 저장하지 않고 요청 본문의 설정으로 백테스트를 실행합니다.")
     public ResponseEntity<BacktestRunResponse> runAdHoc(@Valid @RequestBody RunRequest request) {
         return ResponseEntity.ok(runService.runAdHoc(request));
+    }
+
+    @PostMapping("/performance-report")
+    @Operation(summary = "종목별 예측 성능 리포트 생성",
+            description = "대표 암호화폐에 Buy & Hold와 세 예측 모델을 동일 조건으로 실행해 성과를 집계합니다.")
+    public ResponseEntity<PerformanceReportResponse> generatePerformanceReport(
+            @Valid @RequestBody PerformanceReportRequest request) {
+        return ResponseEntity.ok(runService.generatePerformanceReport(request));
     }
 
     @GetMapping("/strategies/{id}/runs")

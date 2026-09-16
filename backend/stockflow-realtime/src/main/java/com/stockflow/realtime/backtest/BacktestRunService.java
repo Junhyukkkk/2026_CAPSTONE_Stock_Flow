@@ -3,6 +3,9 @@ package com.stockflow.realtime.backtest;
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
 import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
+import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
+import com.stockflow.realtime.backtest.dto.PerformanceReportResponse;
+import com.stockflow.realtime.backtest.dto.PerformanceReportResponse.PerformanceReportRow;
 import com.stockflow.realtime.backtest.dto.RunRequest;
 import com.stockflow.realtime.backtest.dto.TradeResponse;
 import com.stockflow.realtime.backtest.engine.Bar;
@@ -27,9 +30,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -42,6 +47,11 @@ public class BacktestRunService {
 
     private static final BigDecimal DEFAULT_INITIAL_CASH = BigDecimal.valueOf(10000);
     private static final String DEFAULT_SOURCE = "BINANCE";
+    private static final List<String> DEFAULT_REPORT_SYMBOLS = List.of(
+            "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT",
+            "ADAUSDT", "DOGEUSDT", "LTCUSDT", "LINKUSDT", "AVAXUSDT");
+    private static final List<String> REPORT_MODELS = List.of(
+            "ARIMA", "LOG_RETURN_ARIMA", "CHRONOS_BOLT");
 
     private final BacktestStrategyRepository strategyRepository;
     private final BacktestRunRepository runRepository;
@@ -67,6 +77,29 @@ public class BacktestRunService {
         StrategyType type = StrategyType.from(req.getStrategyType());
         BigDecimal initialCash = req.getInitialCash() != null ? req.getInitialCash() : DEFAULT_INITIAL_CASH;
         return execute(null, req.getSymbol(), type, req.getParams(), initialCash, req.getFrom(), req.getTo());
+    }
+
+    /** 동일 조건으로 대표 암호화폐와 예측 모델의 성과를 일괄 집계한다. */
+    @Transactional
+    public PerformanceReportResponse generatePerformanceReport(PerformanceReportRequest request) {
+        validateRange(request.getFrom(), request.getTo());
+        BigDecimal initialCash = request.getInitialCash() != null
+                ? request.getInitialCash() : DEFAULT_INITIAL_CASH;
+        if (initialCash.signum() <= 0) {
+            throw new IllegalArgumentException("initialCash must be positive");
+        }
+
+        List<PerformanceReportRow> rows = new ArrayList<>();
+        for (String symbol : normalizeReportSymbols(request.getSymbols())) {
+            rows.add(runReportRow(symbol, StrategyType.BUY_AND_HOLD, null, Map.of(), initialCash,
+                    request.getFrom(), request.getTo()));
+            for (String model : REPORT_MODELS) {
+                rows.add(runReportRow(symbol, StrategyType.PREDICTION, model,
+                        reportPredictionParams(model), initialCash, request.getFrom(), request.getTo()));
+            }
+        }
+        return new PerformanceReportResponse(
+                request.getFrom(), request.getTo(), initialCash, rows);
     }
 
     private BacktestRunResponse execute(Long strategyId, String symbol, StrategyType type,
@@ -158,6 +191,69 @@ public class BacktestRunService {
                     return signal;
                 })
                 .toList();
+    }
+
+    private PerformanceReportRow runReportRow(
+            String symbol, StrategyType type, String model, Map<String, Object> params,
+            BigDecimal initialCash, LocalDate from, LocalDate to) {
+        try {
+            BacktestRunResponse run = execute(null, symbol, type, params, initialCash, from, to);
+            Map<String, Object> resultParams = run.getParams();
+            return new PerformanceReportRow(
+                    symbol, type.name(), model, "SUCCESS", run.getId(), run.getTotalReturnPct(),
+                    run.getMddPct(), decimalParam(resultParams, "mae"), decimalParam(resultParams, "rmse"),
+                    decimalParam(resultParams, "maePct"), decimalParam(resultParams, "rmsePct"),
+                    intParam(resultParams, "buySignalCount"), intParam(resultParams, "holdSignalCount"),
+                    intParam(resultParams, "sellSignalCount"), run.getTradeCount(), null);
+        } catch (RuntimeException e) {
+            return new PerformanceReportRow(
+                    symbol, type.name(), model, "FAILED",
+                    null, null, null, null, null, null, null,
+                    null, null, null, null, e.getMessage());
+        }
+    }
+
+    private List<String> normalizeReportSymbols(List<String> symbols) {
+        List<String> source = symbols == null || symbols.isEmpty() ? DEFAULT_REPORT_SYMBOLS : symbols;
+        List<String> normalized = source.stream()
+                .filter(symbol -> symbol != null && !symbol.isBlank())
+                .map(symbol -> symbol.trim().toUpperCase(Locale.ROOT))
+                .distinct()
+                .toList();
+        if (normalized.isEmpty()) {
+            throw new IllegalArgumentException("at least one symbol is required");
+        }
+        return normalized;
+    }
+
+    private Map<String, Object> reportPredictionParams(String model) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("model", model);
+        params.put("source", DEFAULT_SOURCE);
+        params.put("warmup", 50);
+        params.put("refitEvery", 5);
+        params.put("maxHistory", 200);
+        params.put("volatilityWindow", 20);
+        params.put("volatilityMultiplier", 0.25);
+        params.put("feeBps", 10.0);
+        params.put("slippageBps", 5.0);
+        return params;
+    }
+
+    private BigDecimal decimalParam(Map<String, Object> params, String key) {
+        Object value = params.get(key);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof BigDecimal decimal) {
+            return decimal;
+        }
+        return new BigDecimal(value.toString());
+    }
+
+    private Integer intParam(Map<String, Object> params, String key) {
+        Object value = params.get(key);
+        return value instanceof Number number ? number.intValue() : null;
     }
 
     public Optional<BacktestRunResponse> getRun(long runId) {
