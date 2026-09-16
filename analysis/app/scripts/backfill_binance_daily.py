@@ -52,6 +52,20 @@ def parse_iso_date(value: str) -> date:
         ) from exc
 
 
+def parse_symbols(value: str) -> list[str]:
+    symbols: list[str] = []
+    seen: set[str] = set()
+    for raw_symbol in value.split(","):
+        symbol = raw_symbol.strip().upper()
+        if symbol and symbol not in seen:
+            symbols.append(symbol)
+            seen.add(symbol)
+
+    if not symbols:
+        raise ValueError("at least one symbol is required")
+    return symbols
+
+
 def validate_range(from_date: date, to_date: date, today: date | None = None) -> None:
     current_date = today or datetime.now(UTC).date()
     if from_date > to_date:
@@ -181,11 +195,35 @@ def insert_missing_rows(rows: list[dict[str, Any]]) -> int:
     return max(result.rowcount or 0, 0)
 
 
+def backfill_symbol(
+    symbol: str, from_date: date, to_date: date, *, apply: bool
+) -> dict[str, Any]:
+    fetched_rows = fetch_klines(symbol, from_date, to_date)
+    existing_dates = load_existing_dates(symbol, from_date, to_date)
+    missing_rows = select_missing_rows(fetched_rows, existing_dates)
+    inserted = insert_missing_rows(missing_rows) if apply else 0
+
+    return {
+        "symbol": symbol,
+        "fetched_count": len(fetched_rows),
+        "existing_count": len(existing_dates),
+        "missing_count": len(missing_rows),
+        "first_missing_date": missing_rows[0]["trade_date"] if missing_rows else None,
+        "last_missing_date": missing_rows[-1]["trade_date"] if missing_rows else None,
+        "inserted_count": inserted,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Inspect or insert missing Binance daily candles."
     )
-    parser.add_argument("--symbol", required=True, help="Binance symbol, e.g. BTCUSDT")
+    symbols = parser.add_mutually_exclusive_group(required=True)
+    symbols.add_argument("--symbol", help="One Binance symbol, e.g. BTCUSDT")
+    symbols.add_argument(
+        "--symbols",
+        help="Comma-separated Binance symbols, e.g. BTCUSDT,ETHUSDT",
+    )
     parser.add_argument("--from", dest="from_date", required=True, type=parse_iso_date)
     parser.add_argument("--to", dest="to_date", required=True, type=parse_iso_date)
     parser.add_argument(
@@ -198,29 +236,28 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    symbol = args.symbol.strip().upper()
-    if not symbol:
-        raise SystemExit("symbol must not be empty")
 
     try:
         validate_range(args.from_date, args.to_date)
-        fetched_rows = fetch_klines(symbol, args.from_date, args.to_date)
-        existing_dates = load_existing_dates(symbol, args.from_date, args.to_date)
-        missing_rows = select_missing_rows(fetched_rows, existing_dates)
-        inserted = insert_missing_rows(missing_rows) if args.apply else 0
+        symbols = parse_symbols(args.symbols or args.symbol)
+        summaries = [
+            backfill_symbol(
+                symbol,
+                args.from_date,
+                args.to_date,
+                apply=args.apply,
+            )
+            for symbol in symbols
+        ]
     except (RuntimeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 
     summary = {
         "mode": "apply" if args.apply else "dry-run",
-        "symbol": symbol,
         "from": args.from_date,
         "to": args.to_date,
-        "fetched_count": len(fetched_rows),
-        "existing_count": len(existing_dates),
-        "missing_count": len(missing_rows),
-        "missing_dates": [row["trade_date"] for row in missing_rows],
-        "inserted_count": inserted,
+        "symbol_count": len(symbols),
+        "summaries": summaries,
     }
     print(json.dumps(summary, ensure_ascii=False, default=str, indent=2))
 

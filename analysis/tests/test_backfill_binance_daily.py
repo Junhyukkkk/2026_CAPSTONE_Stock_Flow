@@ -2,6 +2,7 @@ import unittest
 from datetime import date, datetime, timezone
 
 from app.scripts.backfill_binance_daily import (
+    parse_symbols,
     parse_kline,
     select_missing_rows,
     validate_range,
@@ -9,6 +10,16 @@ from app.scripts.backfill_binance_daily import (
 
 
 class BinanceDailyBackfillTest(unittest.TestCase):
+    def test_parse_symbols_normalizes_and_deduplicates(self):
+        self.assertEqual(
+            ["BTCUSDT", "ETHUSDT"],
+            parse_symbols("btcusdt, ETHUSDT, btcusdt"),
+        )
+
+    def test_parse_symbols_rejects_blank_input(self):
+        with self.assertRaisesRegex(ValueError, "at least one"):
+            parse_symbols(" , ")
+
     def test_parse_kline_maps_daily_candle(self):
         open_time = int(
             datetime(2026, 8, 1, tzinfo=timezone.utc).timestamp() * 1000
