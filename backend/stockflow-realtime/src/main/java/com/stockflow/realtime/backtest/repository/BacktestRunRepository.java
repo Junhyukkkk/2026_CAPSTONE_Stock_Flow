@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stockflow.realtime.backtest.engine.Bar;
 import com.stockflow.realtime.backtest.engine.BacktestResult;
+import com.stockflow.realtime.prediction.PredictionSignalResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -159,6 +160,31 @@ public class BacktestRunRepository {
                 });
     }
 
+    public void savePredictionPoints(
+            long runId, List<PredictionSignalResponse.PredictionSignalPoint> points) {
+        if (points == null || points.isEmpty()) {
+            return;
+        }
+        jdbcTemplate.batchUpdate(
+                """
+                INSERT INTO backtest_prediction_points
+                    (run_id, signal_date, execution_date, reference_price, predicted_price,
+                     expected_return_pct, threshold_pct, signal)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                points, points.size(),
+                (ps, point) -> {
+                    ps.setLong(1, runId);
+                    ps.setDate(2, Date.valueOf(point.signalDate()));
+                    ps.setDate(3, Date.valueOf(point.executionDate()));
+                    ps.setBigDecimal(4, point.referencePrice());
+                    ps.setBigDecimal(5, point.predictedPrice());
+                    ps.setBigDecimal(6, point.expectedReturnPct());
+                    ps.setBigDecimal(7, point.thresholdPct());
+                    ps.setString(8, point.signal());
+                });
+    }
+
     public Optional<RunRow> findRun(long id) {
         List<RunRow> rows = jdbcTemplate.query(
                 "SELECT * FROM backtest_runs WHERE id = ?", runRowMapper, id);
@@ -199,6 +225,26 @@ public class BacktestRunRepository {
                         rs.getDate("trade_date").toLocalDate(),
                         rs.getBigDecimal("equity"),
                         rs.getBigDecimal("drawdown_pct")),
+                runId);
+    }
+
+    public List<PredictionPointRow> findPredictionPoints(long runId) {
+        return jdbcTemplate.query(
+                """
+                SELECT signal_date, execution_date, reference_price, predicted_price,
+                       expected_return_pct, threshold_pct, signal
+                FROM backtest_prediction_points
+                WHERE run_id = ?
+                ORDER BY execution_date ASC
+                """,
+                (rs, rowNum) -> new PredictionPointRow(
+                        rs.getDate("signal_date").toLocalDate(),
+                        rs.getDate("execution_date").toLocalDate(),
+                        rs.getBigDecimal("reference_price"),
+                        rs.getBigDecimal("predicted_price"),
+                        rs.getBigDecimal("expected_return_pct"),
+                        rs.getBigDecimal("threshold_pct"),
+                        rs.getString("signal")),
                 runId);
     }
 
@@ -278,6 +324,17 @@ public class BacktestRunRepository {
             LocalDate tradeDate,
             BigDecimal equity,
             BigDecimal drawdownPct
+    ) {
+    }
+
+    public record PredictionPointRow(
+            LocalDate signalDate,
+            LocalDate executionDate,
+            BigDecimal referencePrice,
+            BigDecimal predictedPrice,
+            BigDecimal expectedReturnPct,
+            BigDecimal thresholdPct,
+            String signal
     ) {
     }
 }

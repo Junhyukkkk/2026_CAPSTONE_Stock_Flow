@@ -2,6 +2,7 @@ package com.stockflow.realtime.backtest;
 
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
+import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.RunRequest;
 import com.stockflow.realtime.backtest.dto.TradeResponse;
 import com.stockflow.realtime.backtest.engine.Bar;
@@ -13,6 +14,7 @@ import com.stockflow.realtime.backtest.engine.strategy.TradingStrategy;
 import com.stockflow.realtime.backtest.model.StrategyType;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository.EquityRow;
+import com.stockflow.realtime.backtest.repository.BacktestRunRepository.PredictionPointRow;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository.RunRow;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository.TradeRow;
 import com.stockflow.realtime.backtest.repository.BacktestStrategyRepository;
@@ -88,6 +90,7 @@ public class BacktestRunService {
             }
             List<Signal> signals;
             BacktestResult result;
+            List<PredictionSignalResponse.PredictionSignalPoint> predictionPoints = List.of();
             if (type == StrategyType.PREDICTION) {
                 PredictionBacktestConfig config = predictionConfig;
                 effectiveParams = config.asParams();
@@ -100,6 +103,7 @@ public class BacktestRunService {
                 }
                 PredictionSignalResponse response = predictionService.backtestSignals(
                         config.toRequest(symbol, from, to));
+                predictionPoints = response.signals();
                 Map<String, Object> predictionParams = new LinkedHashMap<>(config.asParams());
                 predictionParams.put("buySignalCount", response.buyCount());
                 predictionParams.put("holdSignalCount", response.holdCount());
@@ -118,6 +122,7 @@ public class BacktestRunService {
             }
             long runId = runRepository.saveResult(
                     strategyId, symbol, type.name(), effectiveParams, from, to, result);
+            runRepository.savePredictionPoints(runId, predictionPoints);
             return runRepository.findRun(runId).map(this::toRunResponse).orElseThrow();
         } catch (NoDataException e) {
             throw e;
@@ -177,6 +182,15 @@ public class BacktestRunService {
         return Optional.of(runRepository.findEquityCurve(runId).stream().map(this::toEquityResponse).toList());
     }
 
+    public Optional<List<PredictionPointResponse>> getPredictionPoints(long runId) {
+        if (!runRepository.runExists(runId)) {
+            return Optional.empty();
+        }
+        return Optional.of(runRepository.findPredictionPoints(runId).stream()
+                .map(this::toPredictionPointResponse)
+                .toList());
+    }
+
     private void validateRange(LocalDate from, LocalDate to) {
         if (from == null || to == null) {
             throw new IllegalArgumentException("from and to dates are required");
@@ -226,6 +240,18 @@ public class BacktestRunService {
                 .tradeDate(e.tradeDate())
                 .equity(e.equity())
                 .drawdownPct(e.drawdownPct())
+                .build();
+    }
+
+    private PredictionPointResponse toPredictionPointResponse(PredictionPointRow point) {
+        return PredictionPointResponse.builder()
+                .signalDate(point.signalDate())
+                .executionDate(point.executionDate())
+                .referencePrice(point.referencePrice())
+                .predictedPrice(point.predictedPrice())
+                .expectedReturnPct(point.expectedReturnPct())
+                .thresholdPct(point.thresholdPct())
+                .signal(point.signal())
                 .build();
     }
 

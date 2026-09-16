@@ -2,6 +2,7 @@ package com.stockflow.realtime.backtest;
 
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
+import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.RunRequest;
 import com.stockflow.realtime.backtest.dto.StrategyRequest;
 import com.stockflow.realtime.backtest.dto.StrategyResponse;
@@ -121,6 +122,15 @@ public class BacktestController {
     @Operation(summary = "자산 곡선 조회", description = "일자별 평가금액·낙폭(시각화용 데이터)을 조회합니다.")
     public ResponseEntity<List<EquityPointResponse>> getEquityCurve(@PathVariable long runId) {
         return runService.getEquityCurve(runId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/runs/{runId}/prediction-points")
+    @Operation(summary = "예측 분석 포인트 조회",
+            description = "예측 전략 실행의 날짜별 예측가, 기준가, 신호, 임계값을 조회합니다.")
+    public ResponseEntity<List<PredictionPointResponse>> getPredictionPoints(@PathVariable long runId) {
+        return runService.getPredictionPoints(runId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
