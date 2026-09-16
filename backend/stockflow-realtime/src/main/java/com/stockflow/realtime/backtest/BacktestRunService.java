@@ -39,6 +39,7 @@ import java.util.Optional;
 public class BacktestRunService {
 
     private static final BigDecimal DEFAULT_INITIAL_CASH = BigDecimal.valueOf(10000);
+    private static final String DEFAULT_SOURCE = "BINANCE";
 
     private final BacktestStrategyRepository strategyRepository;
     private final BacktestRunRepository runRepository;
@@ -74,18 +75,21 @@ public class BacktestRunService {
             throw new IllegalArgumentException("initialCash must be positive");
         }
 
-        List<Bar> bars = runRepository.loadBars(symbol, from, to);
-        if (bars.isEmpty()) {
-            throw new NoDataException(
-                    "No daily OHLCV data for symbol=" + symbol + " in range " + from + ".." + to);
-        }
-
         Map<String, Object> effectiveParams = params == null ? Map.of() : params;
         try {
+            PredictionBacktestConfig predictionConfig = type == StrategyType.PREDICTION
+                    ? PredictionBacktestConfig.from(effectiveParams)
+                    : null;
+            String source = predictionConfig == null ? DEFAULT_SOURCE : predictionConfig.source();
+            List<Bar> bars = runRepository.loadBars(symbol, source, from, to);
+            if (bars.isEmpty()) {
+                throw new NoDataException(
+                        "No daily OHLCV data for symbol=" + symbol + " in range " + from + ".." + to);
+            }
             List<Signal> signals;
             BacktestResult result;
             if (type == StrategyType.PREDICTION) {
-                PredictionBacktestConfig config = PredictionBacktestConfig.from(effectiveParams);
+                PredictionBacktestConfig config = predictionConfig;
                 effectiveParams = config.asParams();
                 int historyCount = runRepository.countBarsBefore(symbol, config.source(), from);
                 if (historyCount < config.warmup()) {

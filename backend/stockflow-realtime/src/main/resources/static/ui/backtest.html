@@ -143,13 +143,7 @@
                 </div>
                 <details class="advanced-settings">
                     <summary>고급 설정</summary>
-                    <div class="field">
-                        <label>데이터 소스</label>
-                        <select id="source">
-                            <option value="BINANCE" selected>Binance (암호화폐)</option>
-                            <option value="ALPACA">Alpaca (미국 주식)</option>
-                        </select>
-                    </div>
+                    <div class="hint" style="margin-bottom:14px;">백테스트 데이터: Binance 암호화폐 일봉</div>
                     <div class="row">
                         <div class="field">
                             <label>최소 학습 일수</label>
@@ -244,7 +238,7 @@
     function buildRunBody() {
         const params = collectParams();
         if (document.getElementById('strategyType').value === 'PREDICTION') {
-            params.source = document.getElementById('source').value;
+            params.source = 'BINANCE';
         }
         return {
             symbol: document.getElementById('symbol').value.trim().toUpperCase(),

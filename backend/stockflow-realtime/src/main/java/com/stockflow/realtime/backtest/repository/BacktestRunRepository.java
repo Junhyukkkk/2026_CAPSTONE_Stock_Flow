@@ -36,13 +36,15 @@ public class BacktestRunRepository {
      * 백테스트 입력 일봉 로딩. symbol_daily_ohlcv 에 source 가 여러 개일 수 있으므로
      * 일자별로 가장 최근 계산본(computed_at DESC) 하나만 선택한다.
      */
-    public List<Bar> loadBars(String symbol, LocalDate from, LocalDate to) {
+    public List<Bar> loadBars(String symbol, String source, LocalDate from, LocalDate to) {
         return jdbcTemplate.query(
                 """
                 SELECT DISTINCT ON (trade_date)
                        trade_date, open, high, low, close, volume
                 FROM symbol_daily_ohlcv
-                WHERE symbol = ? AND trade_date BETWEEN ? AND ?
+                WHERE symbol = ?
+                  AND source = ?
+                  AND trade_date BETWEEN ? AND ?
                 ORDER BY trade_date ASC, computed_at DESC
                 """,
                 (rs, rowNum) -> new Bar(
@@ -52,7 +54,7 @@ public class BacktestRunRepository {
                         rs.getBigDecimal("low"),
                         rs.getBigDecimal("close"),
                         rs.getBigDecimal("volume")),
-                symbol.toUpperCase(), Date.valueOf(from), Date.valueOf(to));
+                symbol.toUpperCase(), source, Date.valueOf(from), Date.valueOf(to));
     }
 
     /** 시작일 이전에 실제로 저장된 일봉 관측치 수를 반환한다. */
