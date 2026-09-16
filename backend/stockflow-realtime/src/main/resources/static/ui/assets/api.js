@@ -56,6 +56,7 @@ const API = {
     createStrategy: (body) => API.post('/api/backtest/strategies', body),
     deleteStrategy: (id) => API.del(`/api/backtest/strategies/${id}`),
     runAdHoc: (body) => API.post('/api/backtest/run', body),
+    performanceReport: (body) => API.post('/api/backtest/performance-report', body),
     runSaved: (id, from, to) =>
         API.post(`/api/backtest/strategies/${id}/run?from=${from}&to=${to}`, {}),
     runTrades: (runId) => API.get(`/api/backtest/runs/${runId}/trades`),

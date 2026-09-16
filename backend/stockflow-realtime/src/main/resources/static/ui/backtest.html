@@ -17,6 +17,7 @@
         .signal-buy { color: var(--green); font-weight: 700; }
         .signal-sell { color: var(--red); font-weight: 700; }
         .signal-hold { color: var(--muted); font-weight: 700; }
+        .report-note { margin-top: 10px; color: var(--muted); font-size: 12px; }
     </style>
 </head>
 <body>
@@ -52,6 +53,7 @@
             <div class="flex">
                 <button class="btn" id="runBtn" onclick="runBacktest()">선택 모델 실행</button>
                 <button class="btn-ghost" id="compareBtn" onclick="runComparison()">예측 모델 비교</button>
+                <button class="btn-ghost" id="reportBtn" onclick="runPerformanceReport()">대표 코인 성과 리포트</button>
                 <button class="btn-ghost" onclick="saveStrategy()">전략 저장</button>
             </div>
         </div>
@@ -78,6 +80,20 @@
             <table>
                 <thead><tr><th>전략</th><th>누적 수익률</th><th>MDD</th><th>MAE</th><th>RMSE</th><th>BUY / HOLD / SELL</th><th>왕복거래</th><th></th></tr></thead>
                 <tbody id="comparisonBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="performanceReport" class="card mt-16 hidden">
+        <div class="flex-between">
+            <h3>대표 코인 성능 리포트</h3>
+            <span class="muted" id="performanceReportMeta"></span>
+        </div>
+        <div class="report-note">동일 조건으로 Buy & Hold와 세 예측 모델을 실행한 결과입니다. 수수료 10bp, 슬리피지 5bp가 반영됩니다.</div>
+        <div style="overflow-x:auto; margin-top:12px;">
+            <table>
+                <thead><tr><th>종목</th><th>전략 / 모델</th><th>누적 수익률</th><th>MDD</th><th>MAE(%)</th><th>RMSE(%)</th><th>BUY / HOLD / SELL</th><th>왕복거래</th><th>상태</th></tr></thead>
+                <tbody id="performanceReportBody"></tbody>
             </table>
         </div>
     </div>
@@ -226,6 +242,11 @@
         document.getElementById('comparison').classList.add('hidden');
         document.getElementById('comparisonBody').innerHTML = '';
     }
+
+    function hidePerformanceReport() {
+        document.getElementById('performanceReport').classList.add('hidden');
+        document.getElementById('performanceReportBody').innerHTML = '';
+    }
     function friendlyBacktestError(error) {
         const message = String(error?.message || error || '알 수 없는 오류');
         const observations = message.match(/at least (\d+) observations are required before from_date(?:.*?found (\d+))?/i);
@@ -279,6 +300,7 @@
         const body = buildRunBody();
         if (!body.symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
         hideComparison();
+        hidePerformanceReport();
         const button = document.getElementById('runBtn');
         try {
             button.disabled = true;
@@ -426,6 +448,7 @@
     let comparisonRuns = [];
     async function runComparison() {
         if (!validatePredictionSettings()) return;
+        hidePerformanceReport();
         const base = buildRunBody();
         if (!base.symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
         if (base.strategyType !== 'PREDICTION') {
@@ -462,6 +485,76 @@
             runButton.disabled = false;
             compareButton.textContent = '예측 모델 비교';
         }
+    }
+
+    async function runPerformanceReport() {
+        const from = document.getElementById('from').value;
+        const to = document.getElementById('to').value;
+        const initialCash = Number(document.getElementById('initialCash').value);
+        if (!from || !to) { toast('시작일과 종료일을 입력하세요', 'err'); return; }
+        if (from > to) { toast('시작일은 종료일보다 빠르거나 같아야 합니다', 'err'); return; }
+        if (!Number.isFinite(initialCash) || initialCash <= 0) {
+            toast('초기 자본은 0보다 큰 값으로 입력하세요', 'err');
+            return;
+        }
+
+        const button = document.getElementById('reportBtn');
+        const runButton = document.getElementById('runBtn');
+        const compareButton = document.getElementById('compareBtn');
+        try {
+            button.disabled = true;
+            runButton.disabled = true;
+            compareButton.disabled = true;
+            button.textContent = '리포트 생성 중...';
+            toast('대표 코인 성과 리포트를 생성 중입니다...');
+            const report = await API.performanceReport({ from, to, initialCash });
+            renderPerformanceReport(report);
+            toast('대표 코인 성과 리포트 생성 완료', 'ok');
+        } catch (e) {
+            toast('리포트 생성 실패: ' + friendlyBacktestError(e), 'err');
+        } finally {
+            button.disabled = false;
+            runButton.disabled = false;
+            compareButton.disabled = false;
+            button.textContent = '대표 코인 성과 리포트';
+        }
+    }
+
+    function renderPerformanceReport(report) {
+        const section = document.getElementById('performanceReport');
+        const body = document.getElementById('performanceReportBody');
+        const labels = {
+            BUY_AND_HOLD: 'Buy & Hold',
+            ARIMA: '가격 ARIMA',
+            LOG_RETURN_ARIMA: '로그수익률 ARIMA',
+            CHRONOS_BOLT: 'Chronos-Bolt tiny',
+        };
+        const rows = report?.rows || [];
+        document.getElementById('performanceReportMeta').textContent =
+            `${report.fromDate} ~ ${report.toDate} · 초기 ${fmtNum(report.initialCash)} · ${rows.length}개 결과`;
+        body.innerHTML = rows.length ? rows.map(row => {
+            const key = row.strategyType === 'PREDICTION' ? row.model : row.strategyType;
+            const isPrediction = row.strategyType === 'PREDICTION';
+            const signals = isPrediction
+                ? `${row.buySignalCount ?? 0} / ${row.holdSignalCount ?? 0} / ${row.sellSignalCount ?? 0}`
+                : '-';
+            const status = row.status === 'SUCCESS'
+                ? '<span class="up">완료</span>'
+                : `<span class="down" title="${row.errorSummary || '실행 실패'}">실패</span>`;
+            return `<tr>
+                <td>${row.symbol}</td>
+                <td>${labels[key] ?? key}</td>
+                <td class="${signClass(row.totalReturnPct)}">${fmtPct(row.totalReturnPct)}</td>
+                <td>${fmtPct(row.mddPct)}</td>
+                <td>${isPrediction ? fmtPct(row.maePct) : '-'}</td>
+                <td>${isPrediction ? fmtPct(row.rmsePct) : '-'}</td>
+                <td>${signals}</td>
+                <td>${row.tradeCount == null ? '-' : row.tradeCount + '건'}</td>
+                <td>${status}</td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="9" class="muted center">생성된 리포트 결과가 없습니다.</td></tr>';
+        section.classList.remove('hidden');
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function renderComparison() {
