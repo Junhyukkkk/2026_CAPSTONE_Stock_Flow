@@ -8,6 +8,8 @@ import com.stockflow.realtime.backtest.dto.PerformanceReportResponse;
 import com.stockflow.realtime.backtest.dto.RunRequest;
 import com.stockflow.realtime.backtest.dto.StrategyRequest;
 import com.stockflow.realtime.backtest.dto.StrategyResponse;
+import com.stockflow.realtime.backtest.dto.ThresholdReportRequest;
+import com.stockflow.realtime.backtest.dto.ThresholdReportResponse;
 import com.stockflow.realtime.backtest.dto.TradeResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -101,6 +103,14 @@ public class BacktestController {
     public ResponseEntity<PerformanceReportResponse> generatePerformanceReport(
             @Valid @RequestBody PerformanceReportRequest request) {
         return ResponseEntity.ok(runService.generatePerformanceReport(request));
+    }
+
+    @PostMapping("/performance-report/thresholds")
+    @Operation(summary = "신호 기준 계수 비교 리포트 생성",
+            description = "선택한 예측 모델에 0.15, 0.25, 0.35 기준 계수를 적용해 대표 암호화폐 성과를 비교합니다.")
+    public ResponseEntity<ThresholdReportResponse> generateThresholdReport(
+            @Valid @RequestBody ThresholdReportRequest request) {
+        return ResponseEntity.ok(runService.generateThresholdReport(request));
     }
 
     @GetMapping("/strategies/{id}/runs")

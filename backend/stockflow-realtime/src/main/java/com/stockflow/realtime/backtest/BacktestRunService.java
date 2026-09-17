@@ -7,6 +7,9 @@ import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
 import com.stockflow.realtime.backtest.dto.PerformanceReportResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportResponse.PerformanceReportRow;
 import com.stockflow.realtime.backtest.dto.PerformanceReportResponse.PerformanceReportSummary;
+import com.stockflow.realtime.backtest.dto.ThresholdReportRequest;
+import com.stockflow.realtime.backtest.dto.ThresholdReportResponse;
+import com.stockflow.realtime.backtest.dto.ThresholdReportResponse.ThresholdSummary;
 import com.stockflow.realtime.backtest.dto.RunRequest;
 import com.stockflow.realtime.backtest.dto.TradeResponse;
 import com.stockflow.realtime.backtest.engine.Bar;
@@ -55,6 +58,9 @@ public class BacktestRunService {
             "ADAUSDT", "DOGEUSDT", "LTCUSDT", "LINKUSDT", "AVAXUSDT");
     private static final List<String> REPORT_MODELS = List.of(
             "ARIMA", "LOG_RETURN_ARIMA", "CHRONOS_BOLT");
+    private static final BigDecimal DEFAULT_VOLATILITY_MULTIPLIER = BigDecimal.valueOf(0.25);
+    private static final List<BigDecimal> THRESHOLD_COMPARISON_MULTIPLIERS = List.of(
+            BigDecimal.valueOf(0.15), DEFAULT_VOLATILITY_MULTIPLIER, BigDecimal.valueOf(0.35));
 
     private final BacktestStrategyRepository strategyRepository;
     private final BacktestRunRepository runRepository;
@@ -103,6 +109,38 @@ public class BacktestRunService {
         }
         return new PerformanceReportResponse(
                 request.getFrom(), request.getTo(), initialCash, rows, summarizeReportRows(rows));
+    }
+
+    /** 동일 모델에서 신호 기준 계수만 바꿔 대표 암호화폐 성과를 비교한다. */
+    @Transactional
+    public ThresholdReportResponse generateThresholdReport(ThresholdReportRequest request) {
+        validateRange(request.getFrom(), request.getTo());
+        BigDecimal initialCash = request.getInitialCash() != null
+                ? request.getInitialCash() : DEFAULT_INITIAL_CASH;
+        if (initialCash.signum() <= 0) {
+            throw new IllegalArgumentException("initialCash must be positive");
+        }
+        String model = request.getModel().trim().toUpperCase(Locale.ROOT);
+        if (!REPORT_MODELS.contains(model)) {
+            throw new IllegalArgumentException("unsupported prediction model: " + request.getModel());
+        }
+
+        List<ThresholdSummary> summaries = new ArrayList<>();
+        for (BigDecimal multiplier : THRESHOLD_COMPARISON_MULTIPLIERS) {
+            List<PerformanceReportRow> rows = new ArrayList<>();
+            for (String symbol : normalizeReportSymbols(request.getSymbols())) {
+                rows.add(runReportRow(symbol, StrategyType.PREDICTION, model,
+                        reportPredictionParams(model, multiplier), initialCash,
+                        request.getFrom(), request.getTo()));
+            }
+            PerformanceReportSummary summary = summarizeReportRows(rows, StrategyType.PREDICTION, model);
+            summaries.add(new ThresholdSummary(
+                    multiplier, summary.successfulRuns(), summary.failedRuns(), summary.positiveReturnCount(),
+                    summary.averageTotalReturnPct(), summary.averageMddPct(), summary.averageMaePct(),
+                    summary.averageRmsePct(), summary.averageTradeCount()));
+        }
+        return new ThresholdReportResponse(
+                request.getFrom(), request.getTo(), initialCash, model, summaries);
     }
 
     private BacktestRunResponse execute(Long strategyId, String symbol, StrategyType type,
@@ -275,6 +313,10 @@ public class BacktestRunService {
     }
 
     private Map<String, Object> reportPredictionParams(String model) {
+        return reportPredictionParams(model, DEFAULT_VOLATILITY_MULTIPLIER);
+    }
+
+    private Map<String, Object> reportPredictionParams(String model, BigDecimal volatilityMultiplier) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("model", model);
         params.put("source", DEFAULT_SOURCE);
@@ -282,7 +324,7 @@ public class BacktestRunService {
         params.put("refitEvery", 5);
         params.put("maxHistory", 200);
         params.put("volatilityWindow", 20);
-        params.put("volatilityMultiplier", 0.25);
+        params.put("volatilityMultiplier", volatilityMultiplier.doubleValue());
         params.put("feeBps", 10.0);
         params.put("slippageBps", 5.0);
         return params;

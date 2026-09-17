@@ -54,6 +54,7 @@
                 <button class="btn" id="runBtn" onclick="runBacktest()">선택 모델 실행</button>
                 <button class="btn-ghost" id="compareBtn" onclick="runComparison()">예측 모델 비교</button>
                 <button class="btn-ghost" id="reportBtn" onclick="runPerformanceReport()">대표 코인 성과 리포트</button>
+                <button class="btn-ghost" id="thresholdBtn" onclick="runThresholdReport()">신호 기준 계수 비교</button>
                 <button class="btn-ghost" onclick="saveStrategy()">전략 저장</button>
             </div>
         </div>
@@ -101,6 +102,20 @@
             <table>
                 <thead><tr><th>종목</th><th>전략 / 모델</th><th>누적 수익률</th><th>MDD</th><th>MAE(%)</th><th>RMSE(%)</th><th>BUY / HOLD / SELL</th><th>왕복거래</th><th>상태</th></tr></thead>
                 <tbody id="performanceReportBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="thresholdReport" class="card mt-16 hidden">
+        <div class="flex-between">
+            <h3>신호 기준 계수 비교</h3>
+            <span class="muted" id="thresholdReportMeta"></span>
+        </div>
+        <div class="report-note">선택한 모델에서 변동성 기준 계수만 0.15 / 0.25 / 0.35으로 변경한 결과입니다.</div>
+        <div style="overflow-x:auto; margin-top:12px;">
+            <table>
+                <thead><tr><th>기준 계수</th><th>완료</th><th>수익 종목</th><th>평균 수익률</th><th>평균 MDD</th><th>평균 MAE(%)</th><th>평균 RMSE(%)</th><th>평균 왕복거래</th></tr></thead>
+                <tbody id="thresholdReportBody"></tbody>
             </table>
         </div>
     </div>
@@ -175,6 +190,7 @@
         const el = document.getElementById('paramFields');
         hideComparison();
         document.getElementById('compareBtn').classList.toggle('hidden', type !== 'PREDICTION');
+        document.getElementById('thresholdBtn').classList.toggle('hidden', type !== 'PREDICTION');
         document.getElementById('runBtn').textContent =
             type === 'PREDICTION' ? '선택 모델 실행' : '백테스트 실행';
         if (type === 'PREDICTION') {
@@ -255,6 +271,11 @@
         document.getElementById('performanceSummaryBody').innerHTML = '';
         document.getElementById('performanceReportBody').innerHTML = '';
     }
+
+    function hideThresholdReport() {
+        document.getElementById('thresholdReport').classList.add('hidden');
+        document.getElementById('thresholdReportBody').innerHTML = '';
+    }
     function friendlyBacktestError(error) {
         const message = String(error?.message || error || '알 수 없는 오류');
         const observations = message.match(/at least (\d+) observations are required before from_date(?:.*?found (\d+))?/i);
@@ -309,6 +330,7 @@
         if (!body.symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
         hideComparison();
         hidePerformanceReport();
+        hideThresholdReport();
         const button = document.getElementById('runBtn');
         try {
             button.disabled = true;
@@ -457,6 +479,7 @@
     async function runComparison() {
         if (!validatePredictionSettings()) return;
         hidePerformanceReport();
+        hideThresholdReport();
         const base = buildRunBody();
         if (!base.symbol) { toast('종목 심볼을 입력하세요', 'err'); return; }
         if (base.strategyType !== 'PREDICTION') {
@@ -509,10 +532,12 @@
         const button = document.getElementById('reportBtn');
         const runButton = document.getElementById('runBtn');
         const compareButton = document.getElementById('compareBtn');
+        const thresholdButton = document.getElementById('thresholdBtn');
         try {
             button.disabled = true;
             runButton.disabled = true;
             compareButton.disabled = true;
+            thresholdButton.disabled = true;
             button.textContent = '리포트 생성 중...';
             toast('대표 코인 성과 리포트를 생성 중입니다...');
             const report = await API.performanceReport({ from, to, initialCash });
@@ -524,8 +549,78 @@
             button.disabled = false;
             runButton.disabled = false;
             compareButton.disabled = false;
+            thresholdButton.disabled = false;
             button.textContent = '대표 코인 성과 리포트';
         }
+    }
+
+    async function runThresholdReport() {
+        if (!validatePredictionSettings()) return;
+        const base = buildRunBody();
+        if (base.strategyType !== 'PREDICTION') {
+            toast('신호 기준 계수 비교는 PREDICTION 전략에서 실행하세요', 'err');
+            return;
+        }
+        if (!base.from || !base.to) { toast('시작일과 종료일을 입력하세요', 'err'); return; }
+        if (base.from > base.to) { toast('시작일은 종료일보다 빠르거나 같아야 합니다', 'err'); return; }
+        if (!Number.isFinite(base.initialCash) || base.initialCash <= 0) {
+            toast('초기 자본은 0보다 큰 값으로 입력하세요', 'err');
+            return;
+        }
+
+        const button = document.getElementById('thresholdBtn');
+        const runButton = document.getElementById('runBtn');
+        const compareButton = document.getElementById('compareBtn');
+        const reportButton = document.getElementById('reportBtn');
+        try {
+            button.disabled = true;
+            runButton.disabled = true;
+            compareButton.disabled = true;
+            reportButton.disabled = true;
+            button.textContent = '비교 중...';
+            toast('신호 기준 계수 비교 중입니다...');
+            const report = await API.thresholdReport({
+                from: base.from, to: base.to, initialCash: base.initialCash, model: base.params.model,
+            });
+            renderThresholdReport(report);
+            toast('신호 기준 계수 비교 완료', 'ok');
+        } catch (e) {
+            toast('기준 계수 비교 실패: ' + friendlyBacktestError(e), 'err');
+        } finally {
+            button.disabled = false;
+            runButton.disabled = false;
+            compareButton.disabled = false;
+            reportButton.disabled = false;
+            button.textContent = '신호 기준 계수 비교';
+        }
+    }
+
+    function renderThresholdReport(report) {
+        const labels = {
+            ARIMA: '가격 ARIMA',
+            LOG_RETURN_ARIMA: '로그수익률 ARIMA',
+            CHRONOS_BOLT: 'Chronos-Bolt tiny',
+        };
+        const section = document.getElementById('thresholdReport');
+        const body = document.getElementById('thresholdReportBody');
+        const summaries = report?.summaries || [];
+        document.getElementById('thresholdReportMeta').textContent =
+            `${labels[report.model] ?? report.model} · ${report.fromDate} ~ ${report.toDate} · ${summaries.length}개 계수`;
+        body.innerHTML = summaries.length ? summaries.map(summary => {
+            const completed = `${summary.successfulRuns ?? 0} / ${(summary.successfulRuns ?? 0) + (summary.failedRuns ?? 0)}`;
+            return `<tr>
+                <td>${fmtNum(summary.volatilityMultiplier, 2)}</td>
+                <td>${completed}</td>
+                <td>${summary.positiveReturnCount ?? 0}개</td>
+                <td class="${signClass(summary.averageTotalReturnPct)}">${fmtPct(summary.averageTotalReturnPct)}</td>
+                <td>${fmtPct(summary.averageMddPct)}</td>
+                <td>${fmtPct(summary.averageMaePct)}</td>
+                <td>${fmtPct(summary.averageRmsePct)}</td>
+                <td>${summary.averageTradeCount == null ? '-' : fmtNum(summary.averageTradeCount, 1) + '건'}</td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="8" class="muted center">비교 결과가 없습니다.</td></tr>';
+        section.classList.remove('hidden');
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function renderPerformanceReport(report) {
