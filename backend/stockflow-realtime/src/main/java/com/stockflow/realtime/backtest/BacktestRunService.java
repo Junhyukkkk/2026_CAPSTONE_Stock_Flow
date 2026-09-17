@@ -6,6 +6,7 @@ import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
 import com.stockflow.realtime.backtest.dto.PerformanceReportResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportResponse.PerformanceReportRow;
+import com.stockflow.realtime.backtest.dto.PerformanceReportResponse.PerformanceReportSummary;
 import com.stockflow.realtime.backtest.dto.RunRequest;
 import com.stockflow.realtime.backtest.dto.TradeResponse;
 import com.stockflow.realtime.backtest.engine.Bar;
@@ -29,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +39,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
 /**
  * 백테스트 실행 오케스트레이션: 일봉 로딩 → 신호 생성 → 엔진 시뮬레이션 → 결과 저장.
@@ -99,7 +102,7 @@ public class BacktestRunService {
             }
         }
         return new PerformanceReportResponse(
-                request.getFrom(), request.getTo(), initialCash, rows);
+                request.getFrom(), request.getTo(), initialCash, rows, summarizeReportRows(rows));
     }
 
     private BacktestRunResponse execute(Long strategyId, String symbol, StrategyType type,
@@ -211,6 +214,51 @@ public class BacktestRunService {
                     null, null, null, null, null, null, null,
                     null, null, null, null, e.getMessage());
         }
+    }
+
+    private List<PerformanceReportSummary> summarizeReportRows(List<PerformanceReportRow> rows) {
+        List<PerformanceReportSummary> summaries = new ArrayList<>();
+        summaries.add(summarizeReportRows(rows, StrategyType.BUY_AND_HOLD, null));
+        for (String model : REPORT_MODELS) {
+            summaries.add(summarizeReportRows(rows, StrategyType.PREDICTION, model));
+        }
+        return summaries;
+    }
+
+    private PerformanceReportSummary summarizeReportRows(
+            List<PerformanceReportRow> rows, StrategyType type, String model) {
+        List<PerformanceReportRow> matching = rows.stream()
+                .filter(row -> type.name().equals(row.strategyType()))
+                .filter(row -> model == null ? row.model() == null : model.equals(row.model()))
+                .toList();
+        List<PerformanceReportRow> successful = matching.stream()
+                .filter(row -> "SUCCESS".equals(row.status()))
+                .toList();
+        int positiveReturnCount = (int) successful.stream()
+                .filter(row -> row.totalReturnPct() != null && row.totalReturnPct().signum() > 0)
+                .count();
+        return new PerformanceReportSummary(
+                type.name(), model,
+                successful.size(), matching.size() - successful.size(), positiveReturnCount,
+                average(successful, PerformanceReportRow::totalReturnPct),
+                average(successful, PerformanceReportRow::mddPct),
+                average(successful, PerformanceReportRow::maePct),
+                average(successful, PerformanceReportRow::rmsePct),
+                average(successful, row -> row.tradeCount() == null
+                        ? null : BigDecimal.valueOf(row.tradeCount())));
+    }
+
+    private BigDecimal average(
+            List<PerformanceReportRow> rows, Function<PerformanceReportRow, BigDecimal> valueExtractor) {
+        List<BigDecimal> values = rows.stream()
+                .map(valueExtractor)
+                .filter(value -> value != null)
+                .toList();
+        if (values.isEmpty()) {
+            return null;
+        }
+        BigDecimal total = values.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+        return total.divide(BigDecimal.valueOf(values.size()), 6, RoundingMode.HALF_UP);
     }
 
     private List<String> normalizeReportSymbols(List<String> symbols) {

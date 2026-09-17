@@ -9,7 +9,8 @@ public record PerformanceReportResponse(
         LocalDate fromDate,
         LocalDate toDate,
         BigDecimal initialCash,
-        List<PerformanceReportRow> rows
+        List<PerformanceReportRow> rows,
+        List<PerformanceReportSummary> summaries
 ) {
     public record PerformanceReportRow(
             String symbol,
@@ -28,6 +29,20 @@ public record PerformanceReportResponse(
             Integer sellSignalCount,
             Integer tradeCount,
             String errorSummary
+    ) {
+    }
+
+    public record PerformanceReportSummary(
+            String strategyType,
+            String model,
+            int successfulRuns,
+            int failedRuns,
+            int positiveReturnCount,
+            BigDecimal averageTotalReturnPct,
+            BigDecimal averageMddPct,
+            BigDecimal averageMaePct,
+            BigDecimal averageRmsePct,
+            BigDecimal averageTradeCount
     ) {
     }
 }

@@ -90,6 +90,13 @@
             <span class="muted" id="performanceReportMeta"></span>
         </div>
         <div class="report-note">동일 조건으로 Buy & Hold와 세 예측 모델을 실행한 결과입니다. 수수료 10bp, 슬리피지 5bp가 반영됩니다.</div>
+        <div style="overflow-x:auto; margin-top:16px;">
+            <table>
+                <thead><tr><th>전략 / 모델</th><th>완료</th><th>수익 종목</th><th>평균 수익률</th><th>평균 MDD</th><th>평균 MAE(%)</th><th>평균 RMSE(%)</th><th>평균 왕복거래</th></tr></thead>
+                <tbody id="performanceSummaryBody"></tbody>
+            </table>
+        </div>
+        <h3 style="margin-top:24px;">종목별 상세 결과</h3>
         <div style="overflow-x:auto; margin-top:12px;">
             <table>
                 <thead><tr><th>종목</th><th>전략 / 모델</th><th>누적 수익률</th><th>MDD</th><th>MAE(%)</th><th>RMSE(%)</th><th>BUY / HOLD / SELL</th><th>왕복거래</th><th>상태</th></tr></thead>
@@ -245,6 +252,7 @@
 
     function hidePerformanceReport() {
         document.getElementById('performanceReport').classList.add('hidden');
+        document.getElementById('performanceSummaryBody').innerHTML = '';
         document.getElementById('performanceReportBody').innerHTML = '';
     }
     function friendlyBacktestError(error) {
@@ -522,6 +530,7 @@
 
     function renderPerformanceReport(report) {
         const section = document.getElementById('performanceReport');
+        const summaryBody = document.getElementById('performanceSummaryBody');
         const body = document.getElementById('performanceReportBody');
         const labels = {
             BUY_AND_HOLD: 'Buy & Hold',
@@ -530,8 +539,24 @@
             CHRONOS_BOLT: 'Chronos-Bolt tiny',
         };
         const rows = report?.rows || [];
+        const summaries = report?.summaries || [];
         document.getElementById('performanceReportMeta').textContent =
             `${report.fromDate} ~ ${report.toDate} · 초기 ${fmtNum(report.initialCash)} · ${rows.length}개 결과`;
+        summaryBody.innerHTML = summaries.length ? summaries.map(summary => {
+            const key = summary.strategyType === 'PREDICTION' ? summary.model : summary.strategyType;
+            const isPrediction = summary.strategyType === 'PREDICTION';
+            const completed = `${summary.successfulRuns ?? 0} / ${(summary.successfulRuns ?? 0) + (summary.failedRuns ?? 0)}`;
+            return `<tr>
+                <td>${labels[key] ?? key}</td>
+                <td>${completed}</td>
+                <td>${summary.positiveReturnCount ?? 0}개</td>
+                <td class="${signClass(summary.averageTotalReturnPct)}">${fmtPct(summary.averageTotalReturnPct)}</td>
+                <td>${fmtPct(summary.averageMddPct)}</td>
+                <td>${isPrediction ? fmtPct(summary.averageMaePct) : '-'}</td>
+                <td>${isPrediction ? fmtPct(summary.averageRmsePct) : '-'}</td>
+                <td>${summary.averageTradeCount == null ? '-' : fmtNum(summary.averageTradeCount, 1) + '건'}</td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="8" class="muted center">요약 결과가 없습니다.</td></tr>';
         body.innerHTML = rows.length ? rows.map(row => {
             const key = row.strategyType === 'PREDICTION' ? row.model : row.strategyType;
             const isPrediction = row.strategyType === 'PREDICTION';
