@@ -219,12 +219,12 @@ public class RedisPriceService {
      * 현재 Redis 에 최신가 캐시(price:latest:*)가 있는 모든 종목의 스냅샷.
      *
      * 실시간 시세 화면이 "지금 서버가 수신 중인 종목"을 자동으로 채우는 데 쓴다.
-     * 데모 규모(수백~수천 키)에서는 KEYS 스캔으로 충분하다. 운영 규모로 커지면
-     * SCAN + 커서 방식으로 바꿔야 한다.
+     * KEYS는 전체 키스페이스를 훑는 동안 Redis 이벤트 루프를 블로킹하므로
+     * SCAN 커서 방식으로 점진적으로 순회한다.
      */
     public java.util.List<PriceSnapshot> getActivePrices() {
-        java.util.Set<String> keys = redisTemplate.keys(KEY_LATEST_PRICE + "*");
-        if (keys == null || keys.isEmpty()) {
+        java.util.Set<String> keys = scanKeys(KEY_LATEST_PRICE + "*");
+        if (keys.isEmpty()) {
             return java.util.List.of();
         }
 
@@ -247,6 +247,22 @@ public class RedisPriceService {
         }
         result.sort(java.util.Comparator.comparing(PriceSnapshot::getSymbol));
         return result;
+    }
+
+    /**
+     * SCAN 커서로 패턴에 매칭하는 키를 전부 모은다.
+     * KEYS와 달리 매 배치(count)마다 Redis에 제어권을 돌려주므로 다른 명령을 막지 않는다.
+     */
+    private java.util.Set<String> scanKeys(String pattern) {
+        java.util.Set<String> keys = new java.util.HashSet<>();
+        org.springframework.data.redis.core.ScanOptions options =
+                org.springframework.data.redis.core.ScanOptions.scanOptions().match(pattern).count(500).build();
+        try (org.springframework.data.redis.core.Cursor<String> cursor = redisTemplate.scan(options)) {
+            while (cursor.hasNext()) {
+                keys.add(cursor.next());
+            }
+        }
+        return keys;
     }
 
     /**
