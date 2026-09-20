@@ -45,7 +45,7 @@ collectors/
 
 ```bash
 # Kafka 설정
-KAFKA_BOOTSTRAP_SERVERS=kafka:9093
+KAFKA_BOOTSTRAP_SERVERS=kafka:9092
 
 # Binance 설정
 BINANCE_TOP_SYMBOLS_LIMIT=300
@@ -86,7 +86,7 @@ cd ../backend/infra
 docker-compose up -d
 
 # Collectors 실행
-cd ../../collector-python
+cd ../../collectors
 docker-compose up -d
 ```
 
