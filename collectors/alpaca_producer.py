@@ -105,10 +105,12 @@ class AlpacaCollector:
     def build_subscribe_message(self) -> str:
         """구독 메시지 생성"""
         symbols = self.get_subscribe_symbols()
+        # quotes는 수신해도 처리하지 않고 버리는데(핸들러가 pass), 플랜별 동시
+        # 구독 한도를 trades와 같이 소모해 버려서 뺐다. quotes가 필요해지면
+        # _process_single_message의 'q' 분기를 먼저 구현할 것.
         return json.dumps({
             "action": "subscribe",
             "trades": symbols,
-            "quotes": symbols  # 호가도 함께 구독
         })
     
     async def send_message(self, websocket, message: str):
