@@ -48,15 +48,15 @@ for s in order:
 wc = vb.get('stockflow_e2e_latency_websocket_ms_count', 0) - va.get('stockflow_e2e_latency_websocket_ms_count', 0)
 ws = vb.get('stockflow_e2e_latency_websocket_ms_sum', 0) - va.get('stockflow_e2e_latency_websocket_ms_sum', 0)
 print()
-print(f"E2E @ Redis     : p50 {vb.get('stockflow_e2e_latency_p50'):.0f}ms  "
-      f"p90 {vb.get('stockflow_e2e_latency_p90'):.0f}ms  p99 {vb.get('stockflow_e2e_latency_p99'):.0f}ms")
+print(f"E2E @ Redis     : p50 {vb.get('stockflow_e2e_latency_p50') or 0:.0f}ms  "
+      f"p90 {vb.get('stockflow_e2e_latency_p90') or 0:.0f}ms  p99 {vb.get('stockflow_e2e_latency_p99') or 0:.0f}ms")
 if wc:
     print(f"E2E @ WebSocket : avg {ws / wc:.2f}ms  (본측정 {int(wc)}건)")
 # Lettuce 지연 메트릭은 발행 주기마다 리셋되므로 차분하지 않고 B 시점 누적값을 쓴다
 print("Redis 명령(누적): " + '  '.join(f'{k}={cb.get(k, 0):.0f}' for k in ['GET', 'SET', 'PUBLISH', 'EXISTS']))
 hc = vb.get('hikaricp_connections_acquire_seconds_count', 0) - va.get('hikaricp_connections_acquire_seconds_count', 0)
 hs = vb.get('hikaricp_connections_acquire_seconds_sum', 0) - va.get('hikaricp_connections_acquire_seconds_sum', 0)
-print(f"Hikari          : pending={vb.get('hikaricp_connections_pending'):.0f} "
-      f"timeout={vb.get('hikaricp_connections_timeout_total'):.0f} "
+print(f"Hikari          : pending={vb.get('hikaricp_connections_pending') or 0:.0f} "
+      f"timeout={vb.get('hikaricp_connections_timeout_total') or 0:.0f} "
       f"acquire_mean={hs / hc * 1000 if hc else 0:.3f}ms")
-print(f"WS 스레드 누적  : {vb.get('stockflow_ws_dispatch_threads'):.0f}")
+print(f"WS 스레드 누적  : {vb.get('stockflow_ws_dispatch_threads') or 0:.0f}")

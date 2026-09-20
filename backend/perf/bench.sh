@@ -20,6 +20,12 @@
 #
 # 주의: zsh 에서 여러 토글을 변수에 담아 넘길 때는 워드 스플리팅이 일어나지 않는다.
 #       ${=VAR} 를 쓰거나 인자를 하나씩 직접 나열할 것.
+#
+# 경고(파괴적): 이 스크립트는 stockflow-timescaledb 의 market_ticks/instruments 를
+#       truncate 하고 stockflow-redis 를 FLUSHALL 한다 — docker-compose.yml 의 공유
+#       스택과 동일한 컨테이너명이다 (bench 전용 격리 스택이 아님). 실서비스/공유 데이터를
+#       날리므로 BENCH_ALLOW_DESTRUCTIVE=1 환경변수로 명시 동의해야 실행된다.
+#       (비파괴적으로 처리량만 재려면 tps-sweep.sh 를 대신 쓸 것.)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,6 +63,16 @@ echo "  app env: $*   linger.ms=$LINGER_MS  rate=$RATE"
 # --- 1) 상태 초기화 ---
 docker rm -f "$APP" >/dev/null 2>&1 || true
 docker stop stockflow-realtime >/dev/null 2>&1 || true
+
+# 가드: 아래는 stockflow-timescaledb/stockflow-redis (docker-compose.yml 의 공유 스택과
+# 동일 컨테이너명) 를 truncate/FLUSHALL 하는 파괴적 명령이다. bench 전용 격리 스택이
+# 아니므로, 실서비스/공유 데이터를 실수로 날리지 않도록 명시적 opt-in 을 요구한다.
+if [ "${BENCH_ALLOW_DESTRUCTIVE:-}" != "1" ]; then
+  echo "ERROR: bench.sh truncates market_ticks/instruments and FLUSHALLs Redis" >&2
+  echo "on the shared stockflow-timescaledb/stockflow-redis containers." >&2
+  echo "Set BENCH_ALLOW_DESTRUCTIVE=1 to confirm you want to do this." >&2
+  exit 1
+fi
 docker exec stockflow-timescaledb psql -U postgres -d stockflow -q \
   -c "truncate table market_ticks;" \
   -c "truncate table instruments cascade;" \
