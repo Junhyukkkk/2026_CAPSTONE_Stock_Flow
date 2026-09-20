@@ -1,6 +1,8 @@
 package com.stockflow.realtime.storage;
 
 import com.stockflow.core.dto.NormalizedTradeDTO;
+import com.stockflow.realtime.config.OptimizationProperties;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -12,6 +14,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -22,8 +25,19 @@ class InstrumentRegistryServiceTest {
     @Mock
     private JdbcTemplate jdbcTemplate;
 
+    @Mock
+    private OptimizationProperties opt;
+
     @InjectMocks
     private InstrumentRegistryService instrumentRegistryService;
+
+    @BeforeEach
+    void setUp() {
+        // 기본값(false)을 명시적으로 스텁 — register()가 update() 경로(기존 동작)를 타도록 한다.
+        // instrumentCache는 registerDistinctFromTrades_skipsEmpty 에서는 호출되지 않으므로 lenient.
+        lenient().when(opt.isInstrumentRegistryFix()).thenReturn(false);
+        lenient().when(opt.isInstrumentCache()).thenReturn(false);
+    }
 
     @Test
     void registerDistinctFromTrades_callsOncePerSymbol() {
