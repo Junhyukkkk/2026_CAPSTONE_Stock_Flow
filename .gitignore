@@ -62,5 +62,4 @@ backend/perf/*.md
 !backend/perf/README.md
 !backend/perf/SERVER_TEST.md
 !backend/perf/GRAFANA_GAPS.md
-
-!backend/perf/RESULTS.md
+!backend/perf/발표자료.md
