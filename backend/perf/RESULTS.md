@@ -56,6 +56,7 @@ rate 를 8,000까지 올려도 realtime 소비는 ~2,850에 고정 = 하드 실�
   12 컨슈머 스레드가 GET/SET/PUBLISH 를 단일 Lettuce 연결로 직렬화.
 - Redis 는 `maxmemory 256MB` 에 상시 붙어 초당 ~2,000–2,600 키 축출 (누적 4,400만+).
   멱등성 키가 TTL 전에 축출돼 사실상 무력화.
+  (측정 당시 설정. 이후 `docker-compose.yml` 의 Redis `maxmemory` 는 `2gb` 로 상향됨 — 이 결과는 옛 256MB 기준의 역사적 기록.)
 - 측정 한계: 부하 3,000+ 구간에서 샘플러 curl 이 타임아웃해 timeline 의 CPU/lag 표본이 비었다
   (소비율·배수시간은 메인 루프에서 계측되므로 유효). 샘플러는 이후 커밋에서 보강.
 
@@ -65,6 +66,7 @@ rate 를 8,000까지 올려도 realtime 소비는 ~2,850에 고정 = 하드 실�
    12 스레드가 Redis I/O 를 병렬로. 이후 `STOCKFLOW_OPT_REDIS_PIPELINE=true` 로 왕복 3→1회.
    → realtime 실링 2–3배 기대 (발표자료 §8 의 "폐기한 개선안"이 이 전제조건 하나 때문이었음).
 2. **Redis `maxmemory` 상향**(256MB→2GB+) 또는 멱등성 키 TTL 축소 → 축출 폭주 해소.
+   (이미 반영됨 — 현재 `docker-compose.yml` 기준 `--maxmemory 2gb`.)
 3. 서버 NTP 동기화 → `stockflow_e2e_latency` 음수 문제 해결 ([GRAFANA_GAPS.md](GRAFANA_GAPS.md)).
 4. (필요 시) storage/realtime 프로세스 분리 → CPU 경합 제거.
 

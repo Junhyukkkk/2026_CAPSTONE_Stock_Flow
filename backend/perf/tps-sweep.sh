@@ -58,7 +58,17 @@ export APP_URL APP_C KAFKA_C REDIS_C PG_C KAFKA_BOOTSTRAP REALTIME_GROUP STORAGE
 log() { echo -e "\033[1;36m[$(date +%H:%M:%S)]\033[0m $*"; }
 app_prom() { curl -s --max-time 10 "$APP_URL/actuator/prometheus" 2>/dev/null; }
 prom_sum() { awk '$0 !~ /^#/ { v=$NF; if (v+0==v) s+=v } END { printf "%.0f", s }'; }
-total_lag() { app_prom | grep '^kafka_consumer_fetch_manager_records_lag{' | grep "$1-group" | prom_sum; }
+# curl/Prometheus 완전 실패("빈 응답")와 "정상 응답, 합계 0"을 구분해야 한다.
+# prom_sum 은 awk 특성상 입력이 아예 없어도 항상 "0"을 찍으므로, 그 앞단(app_prom 결과)이
+# 비어 있는지를 먼저 확인해 빈 문자열을 전파한다 — 호출부의 l=${l:-...} 폴백이 실제로
+# "값을 모름(=drained 아님으로 취급)"에 걸리도록 하기 위함. sampler()의 prom_prev 재사용과
+# 같은 문제(빈 응답을 유효한 0으로 착각)를 다른 방식으로 해결한다.
+total_lag() {
+  local prom
+  prom=$(app_prom)
+  [ -z "$prom" ] && return 0
+  echo "$prom" | grep '^kafka_consumer_fetch_manager_records_lag{' | grep "$1-group" | prom_sum
+}
 
 run_loadgen() {  # $1=rate $2=duration $3=logfile
   docker run --rm --network "$NETWORK" \
@@ -178,7 +188,10 @@ for RATE in $RATES; do
   log "lag 배수 대기 (상한 ${DRAIN_WAIT}s)"
   ds=$(date +%s); drained=timeout
   while [ $(( $(date +%s) - ds )) -lt "$DRAIN_WAIT" ]; do
-    l=$(total_lag realtime); l=${l:-1}
+    # total_lag 가 curl/Prometheus 실패로 빈 문자열을 반환하면, "값을 모름"을 "완전히
+    # drained(0)"으로 착각하지 않도록 임계값(300)보다 훨씬 큰 값으로 폴백한다.
+    # → 이번 반복은 drained 로 판정하지 않고 계속 대기(sleep 후 재시도)한다.
+    l=$(total_lag realtime); l=${l:-999999999}
     [ "$l" -le 300 ] 2>/dev/null && { drained=$(( $(date +%s) - ds )); break; }
     sleep 5
   done

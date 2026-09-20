@@ -117,10 +117,13 @@ public class ErrorClassifier {
      * @return 재시도 가능 여부
      */
     public boolean isRetryable(ErrorType errorType) {
+        // VALIDATION_ERROR 는 재시도 대상에서 제외한다: ErrorType.VALIDATION_ERROR 의 문서화된
+        // 계약(잘못된 형식/누락 필드는 재시도로 해결되지 않음 → DLQ 직행)과 일치시킨다.
+        // 재시도 포함 시 RetryService 의 블로킹 Thread.sleep 백오프를 컨슈머 스레드에서
+        // 낭비하고도 결국 DLQ 로 가게 된다.
         return errorType == ErrorType.STORAGE_CONNECTION_ERROR ||
                errorType == ErrorType.STORAGE_ERROR ||
-               errorType == ErrorType.TIMEOUT_ERROR ||
-               errorType == ErrorType.VALIDATION_ERROR;  // 실험용: 리밸런싱 재현
+               errorType == ErrorType.TIMEOUT_ERROR;
     }
 
     /**

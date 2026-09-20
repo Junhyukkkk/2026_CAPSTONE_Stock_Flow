@@ -16,12 +16,13 @@ import java.util.Map;
  * 시연/진단용 엔드포인트.
  *
  * Sentry(GlitchTip)·Loki 로그 수집 연동이 실제로 동작하는지 눈으로 확인하기 위한 것이다.
- * stockflow.dev.enabled=false 로 끌 수 있다(기본 활성).
+ * 인증이 없는 진단용 엔드포인트이므로 기본 비활성 — stockflow.dev.enabled=true 로 켠다
+ * (로컬/데모 환경에서만 명시적으로 활성화할 것).
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/dev")
-@ConditionalOnProperty(prefix = "stockflow.dev", name = "enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "stockflow.dev", name = "enabled", havingValue = "true", matchIfMissing = false)
 @Tag(name = "Dev", description = "시연/진단용 엔드포인트 (Sentry·로그 수집 확인)")
 public class DevController {
 

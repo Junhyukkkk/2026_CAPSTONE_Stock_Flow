@@ -1,0 +1,22 @@
+# 민감 정보 / 로컬 전용 설정
+.env
+.env.*
+
+# 버전 관리
+.git
+.gitignore
+
+# 파이썬 캐시/가상환경
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# OS/에디터 잡동사니
+.DS_Store
+.vscode/
+.idea/

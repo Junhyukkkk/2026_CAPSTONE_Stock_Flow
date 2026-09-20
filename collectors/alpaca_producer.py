@@ -7,11 +7,12 @@ import json
 import logging
 import signal
 import sys
+import time
 from datetime import datetime
-from typing import List, Optional
+from typing import List
 
 import websockets
-from websockets.exceptions import ConnectionClosed, InvalidStatusCode
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from config import Config
 from kafka_producer import KafkaProducerWrapper
@@ -41,24 +42,41 @@ class AlpacaCollector:
         )
         self.running = True
         self.websocket = None
-        
+        self._last_health_write = 0.0
+
         # 종료 시그널 핸들러
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-        
+
         # API 키 검증
         if not self.config.ALPACA_API_KEY or not self.config.ALPACA_API_SECRET:
             raise ValueError(
                 "ALPACA_API_KEY와 ALPACA_API_SECRET이 설정되어야 합니다"
             )
-    
+
     def _signal_handler(self, signum, frame):
         """종료 시그널 처리"""
         logger.info(f"🛑 종료 시그널 수신 ({signum})")
         self.running = False
         if self.websocket:
             asyncio.create_task(self.websocket.close())
-    
+
+    def _update_health(self):
+        """
+        마지막 메시지 처리 성공 시각을 헬스체크 파일에 기록.
+        (Docker HEALTHCHECK가 healthcheck.py로 이 파일을 읽어 판단)
+        과도한 파일 I/O를 피하기 위해 최소 기록 간격을 둔다.
+        """
+        now = time.time()
+        if now - self._last_health_write < self.config.HEALTH_WRITE_MIN_INTERVAL_SEC:
+            return
+        self._last_health_write = now
+        try:
+            with open(self.config.HEALTH_FILE_PATH, 'w') as f:
+                json.dump({'last_success_epoch': now}, f)
+        except OSError as e:
+            logger.debug(f"헬스체크 파일 기록 실패: {e}")
+
     def get_subscribe_symbols(self) -> List[str]:
         """구독할 종목 리스트 반환"""
         if self.config.ALPACA_SUBSCRIBE_ALL_STOCKS:
@@ -110,7 +128,17 @@ class AlpacaCollector:
             # 배열 형식 처리
             if isinstance(data, list):
                 for item in data:
-                    await self._process_single_message(item)
+                    # 배치 내 한 항목 처리가 실패해도 나머지 항목은 계속 처리한다
+                    # (이전에는 예외가 바깥 try/except까지 전파되어 같은 배치의
+                    # 나머지 메시지가 전부 유실됐다)
+                    try:
+                        await self._process_single_message(item)
+                    except Exception as e:
+                        logger.error(
+                            f"메시지 처리 중 오류 (배치 내 해당 항목만 건너뜀): {e}, "
+                            f"항목: {item}",
+                            exc_info=True
+                        )
             else:
                 await self._process_single_message(data)
                 
@@ -144,8 +172,9 @@ class AlpacaCollector:
                     value=normalized.to_dict()
                 )
                 if success:
+                    self._update_health()
                     self.kafka_producer.log_stats()
-        
+
         elif message_type == 'q':  # Quote (호가)
             # Quote는 실제 체결이 아니므로 선택적으로 처리
             # 필요시 주석 해제하여 사용
@@ -230,8 +259,8 @@ class AlpacaCollector:
                     )
                     await self.backoff.async_wait()
             
-            except InvalidStatusCode as e:
-                logger.error(f"❌ WebSocket 연결 실패 (HTTP {e.status_code})")
+            except InvalidStatus as e:
+                logger.error(f"❌ WebSocket 연결 실패 (HTTP {e.response.status_code})")
                 if self.running:
                     await self.backoff.async_wait()
             

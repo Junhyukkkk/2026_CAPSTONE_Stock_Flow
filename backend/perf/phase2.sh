@@ -5,14 +5,22 @@
 #   ./phase2.sh restore  → 원래 컨테이너로 복구
 #   ./phase2.sh status
 set -euo pipefail
-REPO=/home/capstone01/capstone
-WT=/home/capstone01/capstone-main
+# 이 스크립트는 특정 운영 서버(학교 서버)의 절대 경로를 하드코딩하고 있다.
+# 다른 머신에서 쓸 땐 REPO/WT 환경변수로 override 할 것.
+REPO=${REPO:-/home/capstone01/capstone}
+WT=${WT:-/home/capstone01/capstone-main}
 IMG=stockflow-realtime:main
 ACTION=${1:-status}
 PAUSE_DURING_BUILD="stockflow-analysis stockflow-alpaca-collector stockflow-kafka-ui stockflow-redis-insight"
 
 case "$ACTION" in
 build)
+  if [ ! -d "$REPO" ]; then
+    echo "!! REPO 디렉터리가 없습니다: $REPO" >&2
+    echo "   이 스크립트는 특정 서버(학교 서버) 경로를 하드코딩하고 있습니다." >&2
+    echo "   REPO=/path/to/capstone $0 build 처럼 override 하세요." >&2
+    exit 1
+  fi
   cd "$REPO"
   git fetch origin main
   if [ -d "$WT/.git" ] || [ -f "$WT/.git" ]; then (cd "$WT" && git fetch origin main && git reset --hard origin/main); else git worktree add -f "$WT" origin/main; fi

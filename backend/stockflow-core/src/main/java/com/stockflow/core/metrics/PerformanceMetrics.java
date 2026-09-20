@@ -4,13 +4,13 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.distribution.ValueAtPercentile;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -51,13 +51,13 @@ public class PerformanceMetrics {
     private final ConcurrentHashMap<String, LongAdder> threadProcessedCount = new ConcurrentHashMap<>();
 
     // E2E Latency
-    private final ConcurrentLinkedDeque<Long> e2eLatencies = new ConcurrentLinkedDeque<>();
+    // 퍼센타일은 e2eLatencySummary(DistributionSummary, publishPercentiles 설정)에서 직접
+    // 읽는다 — 원시 표본을 별도 컬렉션에 쌓아두고 스크레이프마다 정렬하는 방식(O(n))은
+    // 제거했다. min/max/avg 는 O(1) 누적치이므로 그대로 유지.
     private final LongAdder totalE2ELatency = new LongAdder();
     private final AtomicLong e2eLatencyCount = new AtomicLong(0);
     private final AtomicLong minE2ELatency = new AtomicLong(Long.MAX_VALUE);
     private final AtomicLong maxE2ELatency = new AtomicLong(0);
-
-    private static final int MAX_LATENCY_SAMPLES = 100000;
 
     private static final long MILLIS_THRESHOLD = 1_000_000_000_000L;
     private static final long MICROS_THRESHOLD = 1_000_000_000_000_000L;
@@ -66,6 +66,7 @@ public class PerformanceMetrics {
     // Micrometer 메트릭
     private final Counter processedCounter;
     private final Counter failedCounter;
+    private final Counter discardedE2ELatencyCounter;
     private final DistributionSummary processingTimeSummary;
     private final DistributionSummary e2eLatencySummary;
 
@@ -77,6 +78,12 @@ public class PerformanceMetrics {
 
         this.failedCounter = Counter.builder(PREFIX + ".total.failed")
             .description("Total failed messages")
+            .register(registry);
+
+        // 프로듀서/컨슈머 간 시계 skew 로 발생하는 음수 E2E latency 표본을 버릴 때 증가.
+        // (GRAFANA_GAPS.md 의 "stockflow_e2e_latency_p50 이 음수" 원인 대응)
+        this.discardedE2ELatencyCounter = Counter.builder(PREFIX + ".e2e.latency.discarded")
+            .description("Discarded E2E latency samples (negative value, e.g. clock skew)")
             .register(registry);
 
         // DistributionSummary (percentile 지원)
@@ -166,19 +173,23 @@ public class PerformanceMetrics {
         long timestampMs = normalizeToMillis(messageTimestamp);
         long latency = now - timestampMs;
 
+        // 프로듀서/컨슈머 간 시계 skew 로 음수 latency 가 발생할 수 있다 (거래소 timestamp가
+        // 이 서버 시계보다 미래로 보임). 시계 skew 자체는 여기서 고칠 수 없으니, 집계를
+        // 오염시키지 않도록 표본을 버리고 discard 카운터로 발생률만 관찰 가능하게 한다.
+        if (latency < 0) {
+            discardedE2ELatencyCounter.increment();
+            if (log.isDebugEnabled()) {
+                log.debug("Discarding negative E2E latency sample: {}ms (clock skew)", latency);
+            }
+            return;
+        }
+
         e2eLatencyCount.incrementAndGet();
         totalE2ELatency.add(latency);
         e2eLatencySummary.record(latency);
 
         minE2ELatency.updateAndGet(current -> Math.min(current, latency));
         maxE2ELatency.updateAndGet(current -> Math.max(current, latency));
-
-        if (e2eLatencies.size() < MAX_LATENCY_SAMPLES) {
-            e2eLatencies.addLast(latency);
-        } else {
-            e2eLatencies.pollFirst();
-            e2eLatencies.addLast(latency);
-        }
     }
 
     public void recordFailure() {
@@ -220,16 +231,19 @@ public class PerformanceMetrics {
         return (double) totalE2ELatency.sum() / count;
     }
 
+    /**
+     * e2eLatencySummary(DistributionSummary)에 등록된 percentile 중 일치하는 값을 반환한다.
+     * publishPercentiles(0.5, 0.9, 0.95, 0.99)로 미리 계산되는 슬라이딩 윈도우 근사치이므로
+     * 매 스크레이프마다 원시 표본 전체를 정렬하지 않는다 (O(n) 회피).
+     */
     public long getE2ELatencyPercentile(int percentile) {
-        if (e2eLatencies.isEmpty()) return 0;
-
-        List<Long> sorted = new ArrayList<>(e2eLatencies);
-        Collections.sort(sorted);
-
-        int index = (int) Math.ceil((percentile / 100.0) * sorted.size()) - 1;
-        index = Math.max(0, Math.min(index, sorted.size() - 1));
-
-        return sorted.get(index);
+        double target = percentile / 100.0;
+        for (ValueAtPercentile v : e2eLatencySummary.takeSnapshot().percentileValues()) {
+            if (Double.compare(v.percentile(), target) == 0) {
+                return Math.round(v.value());
+            }
+        }
+        return 0L;
     }
 
     public Map<String, Long> getThreadStats() {
@@ -280,7 +294,6 @@ public class PerformanceMetrics {
         lastProcessedTime.set(System.currentTimeMillis());
         startTime.set(System.currentTimeMillis());
         threadProcessedCount.clear();
-        e2eLatencies.clear();
         totalE2ELatency.reset();
         e2eLatencyCount.set(0);
         minE2ELatency.set(Long.MAX_VALUE);

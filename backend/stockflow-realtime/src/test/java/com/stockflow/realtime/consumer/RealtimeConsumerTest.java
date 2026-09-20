@@ -78,8 +78,37 @@ class RealtimeConsumerTest {
         verify(performanceMetrics, times(1)).recordProcessingTime(anyLong());
     }
 
+    /**
+     * processWithRetry()가 true를 반환하는 경우는 "메시지가 정상 처리됐다"만이 아니라
+     * "처리는 실패했지만 DLQ로 durable하게 전송됐다"도 포함한다
+     * (RetryableProcessorDefault/RetryableProcessor 계약, Critical #1 수정 참고).
+     * 두 경우 모두 오프셋은 커밋되어야 한다 — 그렇지 않으면 컨슈머가 그 오프셋에
+     * 영원히 멈추고, retention으로 세그먼트가 삭제되면 이후 메시지가 유실된다.
+     */
     @Test
-    void testConsumeRealtimeTrade_Failure() {
+    void testConsumeRealtimeTrade_ProcessingFailsButDlqSendSucceeds_Acknowledges() {
+        when(retryableProcessor.processWithRetry(any(), any(), any(), anyInt(), anyLong()))
+                .thenReturn(true);
+
+        realtimeConsumer.consumeRealtimeTrade(testTrade, acknowledgment, 0, 100L);
+
+        verify(retryableProcessor, times(1)).processWithRetry(
+                eq(testTrade),
+                any(),
+                any(),
+                eq(0),
+                eq(100L)
+        );
+        verify(acknowledgment, times(1)).acknowledge();
+        verify(performanceMetrics, times(1)).recordSuccessWithLatency(testTrade.getTimestamp());
+    }
+
+    /**
+     * processWithRetry()가 false를 반환하는 것은 이제 "DLQ 전송 자체가 실패했다"는 뜻이다.
+     * 이 경우에만 오프셋 커밋을 보류해 재처리 기회를 남긴다.
+     */
+    @Test
+    void testConsumeRealtimeTrade_DlqSendFails_DoesNotAcknowledge() {
         when(retryableProcessor.processWithRetry(any(), any(), any(), anyInt(), anyLong()))
                 .thenReturn(false);
 

@@ -71,7 +71,7 @@ public class StockController {
     @Operation(summary = "종목 정보 수정", description = "종목의 이름 또는 거래소 정보를 수정합니다.")
     public ResponseEntity<InstrumentResponse> update(
             @PathVariable String symbol,
-            @RequestBody InstrumentUpdateRequest request
+            @Valid @RequestBody InstrumentUpdateRequest request
     ) {
         return instrumentService.update(symbol, request)
                 .map(ResponseEntity::ok)

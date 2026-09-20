@@ -16,9 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 애플리케이션 코드 복사
 COPY . .
 
-# 헬스체크용 스크립트 (선택사항)
+# 헬스체크: 각 producer가 healthcheck.py 참조
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD python -c "import sys; sys.exit(0)"
+  CMD python healthcheck.py
 
 # 기본 명령어 (docker-compose에서 override)
 CMD ["python", "binance_producer.py"]

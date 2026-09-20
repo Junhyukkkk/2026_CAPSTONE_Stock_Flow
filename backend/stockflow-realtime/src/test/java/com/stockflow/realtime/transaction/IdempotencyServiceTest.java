@@ -1,6 +1,7 @@
 package com.stockflow.realtime.transaction;
 
 import com.stockflow.core.dto.NormalizedTradeDTO;
+import com.stockflow.realtime.config.OptimizationProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +31,9 @@ class IdempotencyServiceTest {
     @Mock
     private ValueOperations<String, String> valueOperations;
 
+    @Mock
+    private OptimizationProperties opt;
+
     @InjectMocks
     private IdempotencyService idempotencyService;
 
@@ -38,6 +42,9 @@ class IdempotencyServiceTest {
     @BeforeEach
     void setUp() {
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        // 기본값(false) 유지 — areAlreadyProcessed/markBatchAsProcessed는 파이프라인이 아닌
+        // 메시지당 왕복 경로(기존 동작)를 탄다. 일부 테스트는 이 getter를 호출하지 않으므로 lenient.
+        lenient().when(opt.isStorageIdempotencyPipeline()).thenReturn(false);
 
         long now = System.currentTimeMillis();
         testTrade = NormalizedTradeDTO.builder()

@@ -8,11 +8,12 @@ import logging
 import requests
 import signal
 import sys
+import time
 from datetime import datetime
-from typing import List, Optional
+from typing import List
 
 import websockets
-from websockets.exceptions import ConnectionClosed, InvalidStatusCode
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from config import Config
 from kafka_producer import KafkaProducerWrapper
@@ -43,16 +44,33 @@ class BinanceCollector:
         self.symbols: List[str] = []
         self.running = True
         self.last_symbol_refresh = datetime.utcnow()
-        
+        self._last_health_write = 0.0
+
         # 종료 시그널 핸들러
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-    
+
     def _signal_handler(self, signum, frame):
         """종료 시그널 처리"""
         logger.info(f"🛑 종료 시그널 수신 ({signum})")
         self.running = False
-    
+
+    def _update_health(self):
+        """
+        마지막 메시지 처리 성공 시각을 헬스체크 파일에 기록.
+        (Docker HEALTHCHECK가 healthcheck.py로 이 파일을 읽어 판단)
+        과도한 파일 I/O를 피하기 위해 최소 기록 간격을 둔다.
+        """
+        now = time.time()
+        if now - self._last_health_write < self.config.HEALTH_WRITE_MIN_INTERVAL_SEC:
+            return
+        self._last_health_write = now
+        try:
+            with open(self.config.HEALTH_FILE_PATH, 'w') as f:
+                json.dump({'last_success_epoch': now}, f)
+        except OSError as e:
+            logger.debug(f"헬스체크 파일 기록 실패: {e}")
+
     def get_top_volume_symbols(self, limit: int = None) -> List[str]:
         """
         거래량 상위 종목 리스트 조회
@@ -124,11 +142,26 @@ class BinanceCollector:
         """데이터 수집 메인 루프"""
         topic_name = self.config.BINANCE_TOPIC_NAME
         
-        # 초기 종목 리스트 조회
-        if not self.refresh_symbols():
+        # 초기 종목 리스트 조회 (실패 시 지수 백오프로 재시도.
+        # Binance REST 엔드포인트를 즉시 재요청으로 두드려 레이트리밋/차단
+        # 당하는 것을 방지한다 - 재연결 경로와 동일한 패턴)
+        while self.running and not self.refresh_symbols():
+            logger.warning(
+                f"⚠️ 초기 종목 리스트 조회 실패. "
+                f"{self.backoff.current_delay:.1f}초 후 재시도..."
+            )
+            await self.backoff.async_wait()
+
+        if not self.running:
+            logger.info("🛑 초기화 중 종료 시그널 수신. 종료합니다.")
+            return
+
+        if not self.symbols:
             logger.critical("❌ 초기 종목 리스트를 가져올 수 없습니다. 종료합니다.")
             return
-        
+
+        self.backoff.reset()  # 초기 조회 성공 후 백오프 초기화
+
         logger.info(
             f"🚀 Binance 데이터 수집 시작 | "
             f"종목: {len(self.symbols)}개 | "
@@ -160,11 +193,21 @@ class BinanceCollector:
                     async for raw_message in websocket:
                         if not self.running:
                             break
-                        
+
+                        # 종목 리스트 갱신 주기가 도래하면, 연결이 계속 살아있어도
+                        # (should_refresh_symbols가 재연결 시점에만 체크되어 무한정
+                        # 미뤄지는 것을 방지하기 위해) 스스로 연결을 종료해 바깥
+                        # while 루프에서 갱신 후 재연결하도록 한다.
+                        if self.should_refresh_symbols():
+                            logger.info(
+                                "🔄 종목 리스트 갱신 주기 도달. WebSocket을 재연결합니다."
+                            )
+                            break
+
                         try:
                             data = json.loads(raw_message)
                             normalized = self.normalizer.normalize_binance_data(data)
-                            
+
                             if normalized:
                                 # Kafka 전송
                                 success = self.kafka_producer.produce(
@@ -172,11 +215,12 @@ class BinanceCollector:
                                     key=normalized.symbol,
                                     value=normalized.to_dict()
                                 )
-                                
+
                                 if success:
+                                    self._update_health()
                                     # 통계 로그 출력
                                     self.kafka_producer.log_stats()
-                                
+
                         except json.JSONDecodeError as e:
                             logger.debug(f"JSON 파싱 실패: {e}")
                         except Exception as e:
@@ -190,8 +234,8 @@ class BinanceCollector:
                     )
                     await self.backoff.async_wait()
             
-            except InvalidStatusCode as e:
-                logger.error(f"❌ WebSocket 연결 실패 (HTTP {e.status_code})")
+            except InvalidStatus as e:
+                logger.error(f"❌ WebSocket 연결 실패 (HTTP {e.response.status_code})")
                 if self.running:
                     await self.backoff.async_wait()
             

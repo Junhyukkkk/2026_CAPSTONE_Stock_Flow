@@ -2,6 +2,7 @@
 Kafka Producer 래퍼 모듈
 에러 처리, 메트릭, 재시도 로직 포함
 """
+import functools
 import json
 import logging
 import time
@@ -29,6 +30,7 @@ class KafkaProducerWrapper:
             'last_error_time': None,
             'start_time': time.time()
         }
+        self._last_logged_at_count = 0  # log_stats()가 마지막으로 로그를 남긴 시점의 total_sent
         self._initialize_producer()
         if Config.DLQ_ENABLED:
             self._initialize_dlq_producer()
@@ -67,7 +69,17 @@ class KafkaProducerWrapper:
                 self._send_to_dlq(msg, str(err))
         else:
             self.metrics['total_sent'] += 1
-    
+
+    def _chained_delivery_report(self, extra_callback, err, msg):
+        """
+        기본 delivery report 처리 후, produce() 호출자가 넘긴 추가 콜백(있는 경우)을
+        실행한다. produce() 호출마다 새 람다를 만드는 대신 functools.partial로
+        이 바운드 메서드를 재사용한다.
+        """
+        self._delivery_report(err, msg)
+        if extra_callback:
+            extra_callback(err, msg)
+
     def _send_to_dlq(self, original_msg, error: str):
         """실패한 메시지를 DLQ로 전송"""
         if not self.dlq_producer:
@@ -90,21 +102,21 @@ class KafkaProducerWrapper:
                 topic=Config.DLQ_TOPIC_NAME,
                 key=original_msg.key() if original_msg.key() else 'unknown',
                 value=dlq_value,
-                callback=lambda err, msg: (
-                    self._dlq_delivery_report(err, msg)
-                )
+                callback=self._dlq_delivery_report
             )
             self.dlq_producer.poll(0)
-            self.metrics['total_dlq_sent'] += 1
-            
+            # total_dlq_sent는 실제 전송이 확정되는 _dlq_delivery_report 콜백에서
+            # 증가시킨다 (여기서 증가시키면 큐에 넣기만 하고 실패한 건도 카운트됨)
+
         except Exception as e:
             logger.error(f"❌ DLQ 전송 실패: {e}")
-    
+
     def _dlq_delivery_report(self, err, msg):
         """DLQ 전송 결과 콜백"""
         if err is not None:
             logger.error(f"❌ DLQ 전송 실패: {err}")
         else:
+            self.metrics['total_dlq_sent'] += 1
             logger.debug(f"✅ DLQ 전송 성공: {msg.topic()}")
     
     def produce(self, topic: str, key: str, value: Dict[str, Any], callback=None):
@@ -130,10 +142,7 @@ class KafkaProducerWrapper:
                 topic=topic,
                 key=key,
                 value=value_json,
-                callback=lambda err, msg: (
-                    self._delivery_report(err, msg),
-                    callback(err, msg) if callback else None
-                )
+                callback=functools.partial(self._chained_delivery_report, callback)
             )
             
             # Non-blocking poll (백그라운드 전송 처리)
@@ -178,13 +187,11 @@ class KafkaProducerWrapper:
                 topic=Config.DLQ_TOPIC_NAME,
                 key=key or 'unknown',
                 value=dlq_value,
-                callback=lambda err, msg: (
-                    self._dlq_delivery_report(err, msg)
-                )
+                callback=self._dlq_delivery_report
             )
             self.dlq_producer.poll(0)
-            self.metrics['total_dlq_sent'] += 1
-            
+            # total_dlq_sent는 _dlq_delivery_report 콜백에서 증가 (전송 확정 시점)
+
         except Exception as e:
             logger.error(f"❌ DLQ 직접 전송 실패: {e}")
     
@@ -223,8 +230,13 @@ class KafkaProducerWrapper:
         """통계 로그 출력"""
         if interval is None:
             interval = Config.LOG_STATS_INTERVAL
-        
-        if self.metrics['total_sent'] % interval == 0 and self.metrics['total_sent'] > 0:
+
+        total_sent = self.metrics['total_sent']
+        # 정확히 나누어떨어지는 카운트(% == 0)만 체크하면 비동기 콜백이 몰릴 때
+        # 그 값을 건너뛸 수 있다. 마지막으로 로그를 남긴 시점 이후 interval 이상
+        # 진행됐는지를 >= 로 비교해 그런 경우도 놓치지 않는다.
+        if total_sent > 0 and (total_sent - self._last_logged_at_count) >= interval:
+            self._last_logged_at_count = total_sent
             metrics = self.get_metrics()
             dlq_info = f" | DLQ: {metrics.get('total_dlq_sent', 0):,}건" if Config.DLQ_ENABLED else ""
             logger.info(
