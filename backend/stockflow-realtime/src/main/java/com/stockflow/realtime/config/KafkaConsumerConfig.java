@@ -12,7 +12,9 @@ import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.MicrometerConsumerListener;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
+import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -30,6 +32,9 @@ public class KafkaConsumerConfig {
 
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;
+
+    @Value("${spring.kafka.consumer.auto-offset-reset:latest}")
+    private String autoOffsetReset;
 
     @Value("${spring.kafka.consumer.max-poll-records:100}")
     private int maxPollRecords;
@@ -55,6 +60,16 @@ public class KafkaConsumerConfig {
     @Value("${spring.kafka.consumer.max-partition-fetch-bytes:1048576}")
     private int maxPartitionFetchBytes;
 
+    // StorageConsumer(배치) 컨테이너 레벨 재시도 — DLQ 전송은 StorageService.saveBatch 내부에서
+    // 이미 처리하므로 여기서는 recoverer 없이 바운드된 재시도 횟수만 둔다.
+    // 미설정 시 Spring Kafka 기본값(FixedBackOff(0, 9) — 지연 없이 9회 재시도)이 적용되는데,
+    // 지연 없이 즉시 재시도하면 실패마다 DLQ에 중복 전송이 몰아서 발생한다.
+    @Value("${storage.consumer.error.max-retries:2}")
+    private long storageConsumerErrorMaxRetries;
+
+    @Value("${storage.consumer.error.backoff-ms:2000}")
+    private long storageConsumerErrorBackoffMs;
+
     /**
      * Consumer Factory 설정
      *
@@ -76,8 +91,8 @@ public class KafkaConsumerConfig {
         // Consumer Group 설정 (각 Consumer에서 개별 설정)
         // props.put(ConsumerConfig.GROUP_ID_CONFIG, "realtime-group");
 
-        // 오프셋 리셋 정책
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
+        // 오프셋 리셋 정책 (spring.kafka.consumer.auto-offset-reset 로 설정, 장애 복구 시 운영자가 조정)
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
 
         // 배치 처리 설정 (Storage Consumer용)
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, maxPollRecords);
@@ -153,6 +168,12 @@ public class KafkaConsumerConfig {
 
         // 동시성 설정
         factory.setConcurrency(concurrency);
+
+        // 바운드된 재시도 후 스킵 (recoverer 미지정 — DLQ는 StorageService.saveBatch가 이미 처리).
+        // 재시도가 소진되면 DefaultErrorHandler가 로깅 후 다음 배치로 넘어가 컨슈머가
+        // 하나의 배치에 영원히 멈추지 않도록 한다.
+        factory.setCommonErrorHandler(new DefaultErrorHandler(
+            new FixedBackOff(storageConsumerErrorBackoffMs, storageConsumerErrorMaxRetries)));
 
         return factory;
     }
