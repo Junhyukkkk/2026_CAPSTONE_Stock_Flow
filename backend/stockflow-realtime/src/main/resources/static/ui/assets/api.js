@@ -103,7 +103,7 @@ function renderNav(active) {
     ).join('');
     document.body.insertAdjacentHTML('afterbegin', `
         <div class="topbar">
-            <div class="brand">📈 StockFlow</div>
+            <div class="brand"><span class="mark"></span>StockFlow</div>
             <nav>${nav}</nav>
             <div id="connPill" class="conn-pill"><span class="dot"></span><span id="connText">대기</span></div>
         </div>

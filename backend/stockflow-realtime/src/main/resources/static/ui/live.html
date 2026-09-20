@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StockFlow · 실시간 시세</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
     <link rel="stylesheet" href="assets/app.css">
     <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
@@ -14,24 +15,25 @@
 
         .metric-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
         @media (max-width: 780px) { .metric-row { grid-template-columns: repeat(2, 1fr); } }
-        .metric { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+        .metric { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; box-shadow: 0 1px 2px rgba(16,24,40,0.04); }
         .metric .k { font-size: 11px; color: var(--text-dim); }
-        .metric .v { font-size: 20px; font-weight: 700; margin-top: 2px; }
+        .metric .v { font-size: 20px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
 
         .price-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
         .pc {
             background: var(--card); border: 1px solid var(--border); border-radius: 12px;
             padding: 14px; position: relative; transition: background .18s, border-color .18s;
+            box-shadow: 0 1px 2px rgba(16,24,40,0.04);
         }
         .pc.stale { opacity: .5; }
         .pc.flash-up { animation: fu .6s ease-out; }
         .pc.flash-down { animation: fd .6s ease-out; }
-        @keyframes fu { 0% { background: #14311f; border-color: var(--up); } 100% {} }
-        @keyframes fd { 0% { background: #3a1620; border-color: var(--down); } 100% {} }
+        @keyframes fu { 0% { background: var(--up-bg); border-color: var(--up); } 100% {} }
+        @keyframes fd { 0% { background: var(--down-bg); border-color: var(--down); } 100% {} }
         .pc .top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
         .pc .sym { font-weight: 700; font-size: 15px; }
-        .pc .rm { cursor: pointer; color: var(--text-dim); font-size: 13px; line-height: 1; }
-        .pc .rm:hover { color: var(--down); }
+        .pc .rm { cursor: pointer; color: var(--text-faint); font-size: 13px; line-height: 1; }
+        .pc .rm:hover { color: var(--up); }
         .pc .price { font-size: 24px; font-weight: 700; margin: 8px 0 2px; font-variant-numeric: tabular-nums; }
         .pc .chg { font-size: 13px; font-variant-numeric: tabular-nums; }
         .pc .spark { display: block; width: 100%; height: 40px; margin: 8px 0 6px; }
@@ -40,8 +42,8 @@
         table.live td, table.live th { padding: 8px 10px; }
         table.live .spark { width: 120px; height: 28px; vertical-align: middle; }
         .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-        .seg button { background: var(--bg-2); color: var(--text-dim); border: 0; padding: 7px 12px; font-size: 12px; }
-        .seg button.on { background: var(--accent); color: #07111a; font-weight: 700; }
+        .seg button { background: var(--card); color: var(--text-dim); border: 0; padding: 7px 12px; font-size: 12px; border-radius: 0; }
+        .seg button.on { background: var(--brand); color: #fff; font-weight: 700; }
     </style>
 </head>
 <body>

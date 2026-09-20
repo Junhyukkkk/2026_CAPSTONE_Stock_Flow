@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StockFlow · 종목 & 차트</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
     <link rel="stylesheet" href="assets/app.css">
     <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
@@ -12,10 +13,9 @@
         .layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
         @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
         .stock-list { max-height: 620px; overflow-y: auto; }
-        .stock-row { padding: 10px 12px; border-radius: 8px; cursor: pointer; display:flex; justify-content:space-between; align-items:center; }
+        .stock-row { padding: 10px 12px; border-radius: 8px; cursor: pointer; display:flex; justify-content:space-between; align-items:center; border-left: 3px solid transparent; }
         .stock-row:hover { background: var(--card-2); }
-        .stock-row.sel { background: var(--accent); color:#07111a; }
-        .stock-row.sel .muted, .stock-row.sel .up, .stock-row.sel .down { color:#07111a !important; }
+        .stock-row.sel { background: var(--brand-bg); border-left-color: var(--brand); }
         .pane-label { font-size:12px; color:var(--text-dim); margin:4px 0; }
     </style>
 </head>
@@ -28,7 +28,7 @@
         <!-- 좌: 종목 목록 -->
         <div class="card">
             <div class="field">
-                <input type="text" id="search" placeholder="🔍 종목 검색 (심볼/이름)">
+                <input type="text" id="search" placeholder="종목명 또는 심볼 검색">
             </div>
             <div class="field">
                 <select id="marketFilter">
@@ -165,10 +165,10 @@
         el.innerHTML = '';
         return LightweightCharts.createChart(el, {
             height: height || el.clientHeight,
-            layout: { background: { color: 'transparent' }, textColor: '#8b92a8' },
-            grid: { vertLines: { color: '#2d3346' }, horzLines: { color: '#2d3346' } },
-            timeScale: { borderColor: '#2d3346', timeVisible: !!intraday, secondsVisible: false },
-            rightPriceScale: { borderColor: '#2d3346' },
+            layout: { background: { color: 'transparent' }, textColor: '#8b95a1' },
+            grid: { vertLines: { color: '#eef0f2' }, horzLines: { color: '#eef0f2' } },
+            timeScale: { borderColor: '#e5e8eb', timeVisible: !!intraday, secondsVisible: false },
+            rightPriceScale: { borderColor: '#e5e8eb' },
             crosshair: { mode: 0 },
         });
     }
@@ -207,15 +207,15 @@
             const price = mkChart('priceChart', 360);
             charts.price = price;
             const candle = price.addCandlestickSeries({
-                upColor: '#26c281', downColor: '#ff5e6c', borderVisible: false,
-                wickUpColor: '#26c281', wickDownColor: '#ff5e6c',
+                upColor: '#e0334f', downColor: '#2f6fed', borderVisible: false,
+                wickUpColor: '#e0334f', wickDownColor: '#2f6fed',
             });
             candle.setData(ohlcv.map(o => ({ time: o.date, open: +o.open, high: +o.high, low: +o.low, close: +o.close })));
 
             const vol = price.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' });
             vol.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
             vol.setData(ohlcv.map(o => ({ time: o.date, value: +o.volume,
-                color: (+o.close >= +o.open) ? '#26c28155' : '#ff5e6c55' })));
+                color: (+o.close >= +o.open) ? '#e0334f55' : '#2f6fed55' })));
 
             // 지표 오버레이
             const ind = indicators || [];
@@ -223,28 +223,28 @@
                 const s = price.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
                 s.setData(ind.filter(i => i[key] != null).map(i => ({ time: i.tradeDate, value: +i[key] })));
             };
-            lineSeries('#ffd43b', 'ma5');
-            lineSeries('#00d4ff', 'ma20');
-            lineSeries('#6c5ce7', 'ma60');
-            lineSeries('#888888', 'bbUpper');
-            lineSeries('#888888', 'bbLower');
+            lineSeries('#f59e0b', 'ma5');
+            lineSeries('#2563eb', 'ma20');
+            lineSeries('#7c5cfc', 'ma60');
+            lineSeries('#b0b8c1', 'bbUpper');
+            lineSeries('#b0b8c1', 'bbLower');
 
             // RSI
             const rsi = mkChart('rsiChart', 180); charts.rsi = rsi;
-            const rsiLine = rsi.addLineSeries({ color: '#00d4ff', lineWidth: 2 });
+            const rsiLine = rsi.addLineSeries({ color: '#2563eb', lineWidth: 2 });
             rsiLine.setData(ind.filter(i => i.rsi14 != null).map(i => ({ time: i.tradeDate, value: +i.rsi14 })));
-            rsiLine.createPriceLine({ price: 70, color: '#ff5e6c', lineStyle: 2, lineWidth: 1 });
-            rsiLine.createPriceLine({ price: 30, color: '#26c281', lineStyle: 2, lineWidth: 1 });
+            rsiLine.createPriceLine({ price: 70, color: '#e0334f', lineStyle: 2, lineWidth: 1 });
+            rsiLine.createPriceLine({ price: 30, color: '#12b76a', lineStyle: 2, lineWidth: 1 });
 
             // MACD
             const macd = mkChart('macdChart', 180); charts.macd = macd;
-            macd.addLineSeries({ color: '#00d4ff', lineWidth: 2 })
+            macd.addLineSeries({ color: '#2563eb', lineWidth: 2 })
                 .setData(ind.filter(i => i.macd != null).map(i => ({ time: i.tradeDate, value: +i.macd })));
-            macd.addLineSeries({ color: '#ffd43b', lineWidth: 1 })
+            macd.addLineSeries({ color: '#f59e0b', lineWidth: 1 })
                 .setData(ind.filter(i => i.macdSignal != null).map(i => ({ time: i.tradeDate, value: +i.macdSignal })));
             macd.addHistogramSeries({})
                 .setData(ind.filter(i => i.macdHist != null).map(i => ({ time: i.tradeDate, value: +i.macdHist,
-                    color: (+i.macdHist >= 0) ? '#26c28199' : '#ff5e6c99' })));
+                    color: (+i.macdHist >= 0) ? '#e0334f99' : '#2f6fed99' })));
 
             price.timeScale().fitContent();
             rsi.timeScale().fitContent();
@@ -285,15 +285,15 @@
         const toSec = (t) => Math.floor(new Date(t).getTime() / 1000);
 
         const candle = price.addCandlestickSeries({
-            upColor: '#26c281', downColor: '#ff5e6c', borderVisible: false,
-            wickUpColor: '#26c281', wickDownColor: '#ff5e6c',
+            upColor: '#e0334f', downColor: '#2f6fed', borderVisible: false,
+            wickUpColor: '#e0334f', wickDownColor: '#2f6fed',
         });
         candle.setData(data.map(o => ({ time: toSec(o.time), open: +o.open, high: +o.high, low: +o.low, close: +o.close })));
 
         const vol = price.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: '' });
         vol.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
         vol.setData(data.map(o => ({ time: toSec(o.time), value: +o.volume,
-            color: (+o.close >= +o.open) ? '#26c28155' : '#ff5e6c55' })));
+            color: (+o.close >= +o.open) ? '#e0334f55' : '#2f6fed55' })));
 
         price.timeScale().fitContent();
     }
