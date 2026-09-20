@@ -33,7 +33,8 @@ class Config:
     KAFKA_REQUEST_TIMEOUT_MS: int = int(os.getenv('KAFKA_REQUEST_TIMEOUT_MS', '30000'))
     
     # Binance 설정
-    BINANCE_TOP_SYMBOLS_LIMIT: int = int(os.getenv('BINANCE_TOP_SYMBOLS_LIMIT', '300'))
+    # 0 이하면 상위 거래량 필터링 없이 바이낸스에서 거래 중인 USDT 마켓 전 종목을 수집한다.
+    BINANCE_TOP_SYMBOLS_LIMIT: int = int(os.getenv('BINANCE_TOP_SYMBOLS_LIMIT', '0'))
     BINANCE_SYMBOL_REFRESH_INTERVAL_HOURS: int = int(os.getenv('BINANCE_SYMBOL_REFRESH_INTERVAL_HOURS', '1'))
     BINANCE_TOPIC_NAME: str = os.getenv('BINANCE_TOPIC_NAME', 'market.binance.tick')
     

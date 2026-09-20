@@ -21,7 +21,7 @@ collectors/
 ## 기능
 
 ### Binance Collector
-- 상위 거래량 300개 코인 실시간 수집
+- 거래 중인 USDT 마켓 전 종목 실시간 수집 (`BINANCE_TOP_SYMBOLS_LIMIT`으로 상위 거래량 N개만 수집하도록 제한 가능)
 - 자동 재연결 및 백오프 전략
 - 종목 리스트 주기적 갱신
 - Kafka로 정규화된 데이터 전송
@@ -47,8 +47,8 @@ collectors/
 # Kafka 설정
 KAFKA_BOOTSTRAP_SERVERS=kafka:9092
 
-# Binance 설정
-BINANCE_TOP_SYMBOLS_LIMIT=300
+# Binance 설정 (0 이하 = 전체 종목)
+BINANCE_TOP_SYMBOLS_LIMIT=0
 BINANCE_TOPIC_NAME=market.binance.tick
 
 # Alpaca 설정 (필수)

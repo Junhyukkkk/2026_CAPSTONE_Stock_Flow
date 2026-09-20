@@ -73,28 +73,31 @@ class BinanceCollector:
 
     def get_top_volume_symbols(self, limit: int = None) -> List[str]:
         """
-        거래량 상위 종목 리스트 조회
-        
+        거래 중인 USDT 마켓 종목 리스트 조회
+
         Args:
-            limit: 조회할 종목 수 (기본값: 설정값 사용)
-        
+            limit: 조회할 종목 수 상한 (기본값: 설정값 사용). 0 이하면 전체 종목 반환.
+
         Returns:
             종목 심볼 리스트 (소문자)
         """
         if limit is None:
             limit = self.config.BINANCE_TOP_SYMBOLS_LIMIT
-        
+
         try:
             url = "https://api.binance.com/api/v3/ticker/24hr"
             response = requests.get(url, timeout=10)
             response.raise_for_status()
-            
+
             tickers = response.json()
             usdt_tickers = [t for t in tickers if t['symbol'].endswith('USDT')]
             usdt_tickers.sort(key=lambda x: float(x['quoteVolume']), reverse=True)
-            
-            symbols = [t['symbol'].lower() for t in usdt_tickers[:limit]]
-            logger.info(f"✅ {len(symbols)}개 종목 조회 완료 (상위 {limit}개)")
+
+            if limit and limit > 0:
+                usdt_tickers = usdt_tickers[:limit]
+
+            symbols = [t['symbol'].lower() for t in usdt_tickers]
+            logger.info(f"✅ {len(symbols)}개 종목 조회 완료 ({'상위 ' + str(limit) + '개' if limit and limit > 0 else '전체'})")
             return symbols
             
         except requests.exceptions.RequestException as e:
