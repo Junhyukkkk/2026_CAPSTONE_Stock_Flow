@@ -1,0 +1,44 @@
+name: Deploy to server
+
+# main에 머지(직접 push 포함)되면: 빌드+테스트 -> 통과하면 학교 서버에 SSH로 접속해
+# 최신 코드를 pull하고 docker compose로 재기동한다.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build and test
+        run: ./gradlew build
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: 114.71.51.41
+          port: 22000
+          username: capstone01
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/capstone
+            git fetch origin
+            git reset --hard origin/main
+            cd backend/infra
+            docker compose --profile metrics --profile alpaca up -d --build
