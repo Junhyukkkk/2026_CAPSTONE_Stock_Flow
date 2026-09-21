@@ -7,6 +7,12 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
+# 서버는 하나라 배포는 한 번에 하나만. 연달아 merge되면 뒤 실행은 대기했다가
+# 앞 배포가 끝난 뒤에 돈다 (동시에 docker compose up 을 돌리면 컨테이너 이름 충돌로 실패).
+concurrency:
+  group: deploy-school-server
+  cancel-in-progress: false
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
