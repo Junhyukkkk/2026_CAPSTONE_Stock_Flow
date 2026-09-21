@@ -1,6 +1,7 @@
 package com.stockflow.realtime.config;
 
 import com.stockflow.realtime.listener.RedisMessageListener;
+import com.stockflow.realtime.redis.PriceKeys;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -66,8 +67,8 @@ public class RedisConfig {
             container.setTaskExecutor(executor);
         }
 
-        // price:* 패턴 구독 (price:AAPL, price:BTCUSDT 등)
-        container.addMessageListener(redisMessageListener, new PatternTopic("price:*"));
+        // price:* 패턴 구독 (price:AAPL, price:BTCUSDT 등) — 이름 규칙은 PriceKeys
+        container.addMessageListener(redisMessageListener, new PatternTopic(PriceKeys.PRICE_CHANNEL_PATTERN));
 
         return container;
     }

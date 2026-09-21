@@ -11,7 +11,7 @@ services:
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
       - BINANCE_TOP_SYMBOLS_LIMIT=${BINANCE_TOP_SYMBOLS_LIMIT:-300}
-      - BINANCE_TOPIC_NAME=${BINANCE_TOPIC_NAME:-market.binance.tick}
+      - KAFKA_TOPIC_NAME=${KAFKA_TOPIC_NAME:-market.normalized}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - .:/app
@@ -41,7 +41,7 @@ services:
       - ALPACA_API_KEY=${ALPACA_API_KEY}
       - ALPACA_API_SECRET=${ALPACA_API_SECRET}
       - ALPACA_WEBSOCKET_URL=${ALPACA_WEBSOCKET_URL:-wss://stream.data.alpaca.markets/v2/iex}
-      - ALPACA_TOPIC_NAME=${ALPACA_TOPIC_NAME:-market.alpaca.tick}
+      - KAFKA_TOPIC_NAME=${KAFKA_TOPIC_NAME:-market.normalized}
       - ALPACA_SUBSCRIBE_ALL_STOCKS=${ALPACA_SUBSCRIBE_ALL_STOCKS:-true}
       - ALPACA_SUBSCRIBE_SYMBOLS=${ALPACA_SUBSCRIBE_SYMBOLS:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

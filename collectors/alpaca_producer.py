@@ -169,7 +169,7 @@ class AlpacaCollector:
             normalized = self.normalizer.normalize_alpaca_trade_data(message)
             if normalized:
                 success = self.kafka_producer.produce(
-                    topic=self.config.ALPACA_TOPIC_NAME,
+                    topic=self.config.KAFKA_TOPIC_NAME,
                     key=normalized.symbol,
                     value=normalized.to_dict()
                 )
@@ -183,7 +183,7 @@ class AlpacaCollector:
             # normalized = self.normalizer.normalize_alpaca_quote_data(message)
             # if normalized:
             #     self.kafka_producer.produce(
-            #         topic=self.config.ALPACA_TOPIC_NAME,
+            #         topic=self.config.KAFKA_TOPIC_NAME,
             #         key=normalized.symbol,
             #         value=normalized.to_dict()
             #     )
@@ -201,7 +201,7 @@ class AlpacaCollector:
     
     async def collect_data(self):
         """데이터 수집 메인 루프"""
-        topic_name = self.config.ALPACA_TOPIC_NAME
+        topic_name = self.config.KAFKA_TOPIC_NAME
         websocket_url = self.config.ALPACA_WEBSOCKET_URL
         
         symbols = self.get_subscribe_symbols()

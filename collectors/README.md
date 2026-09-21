@@ -46,15 +46,14 @@ collectors/
 ```bash
 # Kafka 설정
 KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+KAFKA_TOPIC_NAME=market.normalized
 
 # Binance 설정 (0 이하 = 전체 종목)
 BINANCE_TOP_SYMBOLS_LIMIT=0
-BINANCE_TOPIC_NAME=market.binance.tick
 
 # Alpaca 설정 (필수)
 ALPACA_API_KEY=your-api-key
 ALPACA_API_SECRET=your-api-secret
-ALPACA_TOPIC_NAME=market.alpaca.tick
 ALPACA_SUBSCRIBE_ALL_STOCKS=true
 
 # 로깅
@@ -110,9 +109,10 @@ docker-compose up -d
 
 ## Kafka Topics
 
-- `market.binance.tick`: Binance 암호화폐 데이터 (6 파티션, 4시간 retention)
-- `market.alpaca.tick`: Alpaca 주식 데이터 (12 파티션, 4시간 retention)
+- `market.normalized`: Binance/Alpaca 공통 정규화 시세 (12 파티션, 4시간 retention). Consumer가 구독하는 유일한 시세 토픽.
 - `market.dlq`: Dead Letter Queue - 실패한 메시지 (3 파티션, 7일 retention)
+
+토픽은 `backend/infra/docker-compose.yml`의 `kafka-setup` 서비스가 기동 시 자동 생성한다.
 
 **Topic 설계 상세**: [KAFKA_TOPIC_DESIGN.md](KAFKA_TOPIC_DESIGN.md) 참조
 

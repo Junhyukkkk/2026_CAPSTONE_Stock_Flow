@@ -143,7 +143,7 @@ class BinanceCollector:
     
     async def collect_data(self):
         """데이터 수집 메인 루프"""
-        topic_name = self.config.BINANCE_TOPIC_NAME
+        topic_name = self.config.KAFKA_TOPIC_NAME
         
         # 초기 종목 리스트 조회 (실패 시 지수 백오프로 재시도.
         # Binance REST 엔드포인트를 즉시 재요청으로 두드려 레이트리밋/차단

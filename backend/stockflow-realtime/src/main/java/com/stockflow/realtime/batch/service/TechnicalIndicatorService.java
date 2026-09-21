@@ -30,26 +30,9 @@ public class TechnicalIndicatorService {
     private static final BigDecimal  BB_MULT     = BigDecimal.valueOf(2);
 
     /**
-     * 기존 compute 메소드 (하위 호환).
-     * 종가만으로 계산 가능한 지표만 반환.
-     */
-    public DailyIndicatorItem compute(String symbol, LocalDate tradeDate, List<BigDecimal> closes) {
-        return DailyIndicatorItem.builder()
-                .symbol(symbol)
-                .tradeDate(tradeDate)
-                .ma5(sma(closes, 5))
-                .ma20(sma(closes, 20))
-                .ma60(sma(closes, 60))
-                .rsi14(rsi(closes, RSI_PERIOD))
-                .macd(macdLine(closes))
-                .macdSignal(macdSignal(closes))
-                .macdHist(macdHist(closes))
-                .build();
-    }
-
-    /**
-     * OHLCV 데이터를 받아 모든 지표를 계산.
-     * 볼린저 밴드, 스토캐스틱, ATR, OBV 포함.
+     * OHLCV 시계열(오래된 순 → 최신 순)로 11개 지표를 한 번에 계산한다.
+     * Batch Tasklet(IndicatorJobConfig)이 호출하는 단일 진입점.
+     * 데이터가 부족한 지표만 null 로 두고 나머지는 계산한다.
      */
     public DailyIndicatorItem computeWithOhlcv(String symbol, LocalDate tradeDate, List<OhlcvData> ohlcvList) {
         // 종가 리스트 추출
@@ -271,27 +254,6 @@ public class TechnicalIndicatorService {
         return ema.setScale(SCALE, RoundingMode.HALF_UP);
     }
 
-    /**
-     * 특정 시작 인덱스부터 EMA를 계산. MACD 시그널 계산에 사용.
-     */
-    private List<BigDecimal> emaList(List<BigDecimal> data, int period) {
-        if (data.size() < period) return List.of();
-
-        BigDecimal multiplier    = BigDecimal.valueOf(2.0 / (period + 1));
-        BigDecimal oneMinusMult  = BigDecimal.ONE.subtract(multiplier);
-
-        BigDecimal ema = sma(data.subList(0, period), period);
-        List<BigDecimal> result = new ArrayList<>();
-        result.add(ema);
-
-        for (int i = period; i < data.size(); i++) {
-            ema = data.get(i).multiply(multiplier, MC)
-                    .add(ema.multiply(oneMinusMult, MC));
-            result.add(ema);
-        }
-        return result;
-    }
-
     // ── RSI ──────────────────────────────────────────────────────────────────
 
     public BigDecimal rsi(List<BigDecimal> closes, int period) {
@@ -327,7 +289,7 @@ public class TechnicalIndicatorService {
         }
 
         if (avgLoss.compareTo(BigDecimal.ZERO) == 0) {
-            return BigDecimal.valueOf(100).setScale(SCALE, RoundingMode.HALF_UP);
+            return BigDecimal.valueOf(100).setScale(4, RoundingMode.HALF_UP);
         }
 
         BigDecimal rs  = avgGain.divide(avgLoss, MC);

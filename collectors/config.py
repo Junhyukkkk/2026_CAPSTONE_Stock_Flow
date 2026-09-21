@@ -19,7 +19,10 @@ class Config:
     # Kafka 설정
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092')
     KAFKA_CLIENT_ID_PREFIX: str = os.getenv('KAFKA_CLIENT_ID_PREFIX', 'stockflow-collector')
-    
+    # 정규화된 시세를 보내는 토픽. Binance/Alpaca 모두 여기 하나로 보내고,
+    # Spring Consumer들은 이 토픽만 구독한다 (KAFKA_TOPIC_DESIGN.md 참고).
+    KAFKA_TOPIC_NAME: str = os.getenv('KAFKA_TOPIC_NAME', 'market.normalized')
+
     # Kafka Producer 설정
     KAFKA_LINGER_MS: int = int(os.getenv('KAFKA_LINGER_MS', '10'))
     KAFKA_BATCH_NUM_MESSAGES: int = int(os.getenv('KAFKA_BATCH_NUM_MESSAGES', '1000'))
@@ -36,8 +39,7 @@ class Config:
     # 0 이하면 상위 거래량 필터링 없이 바이낸스에서 거래 중인 USDT 마켓 전 종목을 수집한다.
     BINANCE_TOP_SYMBOLS_LIMIT: int = int(os.getenv('BINANCE_TOP_SYMBOLS_LIMIT', '0'))
     BINANCE_SYMBOL_REFRESH_INTERVAL_HOURS: int = int(os.getenv('BINANCE_SYMBOL_REFRESH_INTERVAL_HOURS', '1'))
-    BINANCE_TOPIC_NAME: str = os.getenv('BINANCE_TOPIC_NAME', 'market.binance.tick')
-    
+
     # Alpaca 설정
     ALPACA_API_KEY: Optional[str] = os.getenv('ALPACA_API_KEY')
     ALPACA_API_SECRET: Optional[str] = os.getenv('ALPACA_API_SECRET')
@@ -45,8 +47,7 @@ class Config:
         'ALPACA_WEBSOCKET_URL', 
         'wss://stream.data.alpaca.markets/v2/iex'
     )
-    ALPACA_TOPIC_NAME: str = os.getenv('ALPACA_TOPIC_NAME', 'market.alpaca.tick')
-    
+
     # DLQ 설정
     DLQ_TOPIC_NAME: str = os.getenv('DLQ_TOPIC_NAME', 'market.dlq')
     DLQ_ENABLED: bool = os.getenv('DLQ_ENABLED', 'true').lower() == 'true'
@@ -84,15 +85,14 @@ class Config:
         if cls.ALPACA_API_SECRET and not cls.ALPACA_API_KEY:
             errors.append("ALPACA_API_KEY가 설정되지 않았습니다")
 
-        # Binance/Alpaca가 같은 토픽으로 설정되면 두 소스의 데이터가 섞여
-        # market.binance.tick / market.alpaca.tick에 설계된 파티션 수·retention이
-        # 무의미해지고, 파티션 키(symbol) 충돌 시 순서 보장도 깨질 수 있다.
-        if cls.BINANCE_TOPIC_NAME == cls.ALPACA_TOPIC_NAME:
-            errors.append(
-                f"BINANCE_TOPIC_NAME과 ALPACA_TOPIC_NAME이 동일합니다 "
-                f"('{cls.BINANCE_TOPIC_NAME}'). 두 거래소는 서로 다른 토픽을 사용해야 "
-                f"합니다 (예: market.binance.tick / market.alpaca.tick)"
-            )
+        # 예전 소스별 토픽 변수는 더 이상 읽지 않는다 (KAFKA_TOPIC_NAME 하나로 통일).
+        # 옛 .env 로 배포하는 경우를 위해 흔적만 남긴다.
+        for legacy in ('BINANCE_TOPIC_NAME', 'ALPACA_TOPIC_NAME'):
+            if os.getenv(legacy):
+                logger.warning(
+                    f"⚠️ {legacy} 는 더 이상 사용되지 않아 무시됩니다. "
+                    f"KAFKA_TOPIC_NAME (현재 '{cls.KAFKA_TOPIC_NAME}') 을 사용하세요"
+                )
 
         if errors:
             for error in errors:

@@ -28,8 +28,9 @@ import java.util.List;
 
 /**
  * 일일 기술적 지표 계산 Job.
- * symbol_daily_ohlcv에서 심볼별 최근 60일 종가를 읽어
- * MA5/MA20/MA60/RSI14/MACD를 계산한 뒤 symbol_daily_indicators에 UPSERT.
+ * symbol_daily_ohlcv에서 심볼별 최근 60일 OHLCV를 읽어
+ * MA5/20/60 · RSI14 · MACD(라인/시그널/히스토그램) · 볼린저 밴드 · 스토캐스틱 %K/%D · ATR14 · OBV
+ * 를 계산한 뒤 symbol_daily_indicators에 UPSERT.
  *
  * Tasklet 방식을 선택한 이유:
  * 지표 계산은 심볼 하나당 60개 행의 히스토리가 필요해

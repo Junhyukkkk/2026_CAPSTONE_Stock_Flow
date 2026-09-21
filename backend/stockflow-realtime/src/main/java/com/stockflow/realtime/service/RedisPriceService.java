@@ -7,19 +7,26 @@ import com.stockflow.core.dto.PriceSnapshot;
 import com.stockflow.core.metrics.PipelineStageMetrics;
 import com.stockflow.core.metrics.PipelineStageMetrics.Stage;
 import com.stockflow.realtime.config.OptimizationProperties;
+import com.stockflow.realtime.redis.PriceKeys;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.RedisStringCommands;
+import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.types.Expiration;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -30,6 +37,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * - 전일 종가 관리 (price:prev-close:{symbol})
  * - 등락률 계산
  * - Pub/Sub 발행 (price:{symbol})
+ *
+ * 키·채널 이름 규칙은 {@link PriceKeys} 참고.
  */
 @Slf4j
 @Service
@@ -50,17 +59,6 @@ public class RedisPriceService {
     }
 
     private final Map<String, CachedPrevClose> prevCloseCache = new ConcurrentHashMap<>();
-
-    // Redis Key Prefix
-    private static final String KEY_LATEST_PRICE = "price:latest:";
-    private static final String KEY_PREV_CLOSE = "price:prev-close:";
-
-    // Pub/Sub Channel Prefix
-    private static final String CHANNEL_PRICE = "price:";
-
-    // TTL 설정
-    private static final Duration TTL_LATEST_PRICE = Duration.ofSeconds(60);
-    private static final Duration TTL_PREV_CLOSE = Duration.ofHours(24);
 
     /**
      * 실시간 거래 데이터 처리
@@ -126,14 +124,14 @@ public class RedisPriceService {
      */
     private void saveLatestPrice(String symbol, PriceSnapshot snapshot) {
         try {
-            String key = KEY_LATEST_PRICE + symbol;
+            String key = PriceKeys.latestPrice(symbol);
 
             long serializeStart = stageMetrics.start();
             String value = objectMapper.writeValueAsString(snapshot);
             stageMetrics.record(Stage.SNAPSHOT_SERIALIZE, serializeStart);
 
             long setStart = stageMetrics.start();
-            redisTemplate.opsForValue().set(key, value, TTL_LATEST_PRICE);
+            redisTemplate.opsForValue().set(key, value, PriceKeys.LATEST_PRICE_TTL);
             stageMetrics.record(Stage.REDIS_SET_LATEST, setStart);
 
             log.trace("Cached latest price: key={}", key);
@@ -154,15 +152,15 @@ public class RedisPriceService {
             String payload = objectMapper.writeValueAsString(snapshot);
             stageMetrics.record(Stage.SNAPSHOT_SERIALIZE, serializeStart);
 
-            byte[] key = (KEY_LATEST_PRICE + symbol).getBytes(StandardCharsets.UTF_8);
-            byte[] channel = (CHANNEL_PRICE + symbol).getBytes(StandardCharsets.UTF_8);
+            byte[] key = PriceKeys.latestPrice(symbol).getBytes(StandardCharsets.UTF_8);
+            byte[] channel = PriceKeys.priceChannel(symbol).getBytes(StandardCharsets.UTF_8);
             byte[] value = payload.getBytes(StandardCharsets.UTF_8);
 
             long pipelineStart = stageMetrics.start();
             redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
                 connection.stringCommands().set(
                         key, value,
-                        Expiration.from(TTL_LATEST_PRICE),
+                        Expiration.from(PriceKeys.LATEST_PRICE_TTL),
                         RedisStringCommands.SetOption.upsert());
                 connection.publish(channel, value);
                 return null;
@@ -181,7 +179,7 @@ public class RedisPriceService {
      */
     private void publishPriceUpdate(String symbol, PriceSnapshot snapshot) {
         try {
-            String channel = CHANNEL_PRICE + symbol;
+            String channel = PriceKeys.priceChannel(symbol);
 
             // saveLatestPrice와 동일한 snapshot을 다시 직렬화한다 (중복 비용 계측용)
             long serializeStart = stageMetrics.start();
@@ -203,7 +201,7 @@ public class RedisPriceService {
      */
     public PriceSnapshot getLatestPrice(String symbol) {
         try {
-            String key = KEY_LATEST_PRICE + symbol;
+            String key = PriceKeys.latestPrice(symbol);
             String value = redisTemplate.opsForValue().get(key);
             if (value == null) {
                 return null;
@@ -222,19 +220,19 @@ public class RedisPriceService {
      * KEYS는 전체 키스페이스를 훑는 동안 Redis 이벤트 루프를 블로킹하므로
      * SCAN 커서 방식으로 점진적으로 순회한다.
      */
-    public java.util.List<PriceSnapshot> getActivePrices() {
-        java.util.Set<String> keys = scanKeys(KEY_LATEST_PRICE + "*");
+    public List<PriceSnapshot> getActivePrices() {
+        Set<String> keys = scanKeys(PriceKeys.LATEST_PRICE_PREFIX + "*");
         if (keys.isEmpty()) {
-            return java.util.List.of();
+            return List.of();
         }
 
-        java.util.List<String> keyList = new java.util.ArrayList<>(keys);
-        java.util.List<String> values = redisTemplate.opsForValue().multiGet(keyList);
+        List<String> keyList = new ArrayList<>(keys);
+        List<String> values = redisTemplate.opsForValue().multiGet(keyList);
         if (values == null) {
-            return java.util.List.of();
+            return List.of();
         }
 
-        java.util.List<PriceSnapshot> result = new java.util.ArrayList<>(values.size());
+        List<PriceSnapshot> result = new ArrayList<>(values.size());
         for (String value : values) {
             if (value == null) {
                 continue;
@@ -245,7 +243,7 @@ public class RedisPriceService {
                 log.warn("Failed to deserialize active price snapshot", e);
             }
         }
-        result.sort(java.util.Comparator.comparing(PriceSnapshot::getSymbol));
+        result.sort(Comparator.comparing(PriceSnapshot::getSymbol));
         return result;
     }
 
@@ -253,11 +251,10 @@ public class RedisPriceService {
      * SCAN 커서로 패턴에 매칭하는 키를 전부 모은다.
      * KEYS와 달리 매 배치(count)마다 Redis에 제어권을 돌려주므로 다른 명령을 막지 않는다.
      */
-    private java.util.Set<String> scanKeys(String pattern) {
-        java.util.Set<String> keys = new java.util.HashSet<>();
-        org.springframework.data.redis.core.ScanOptions options =
-                org.springframework.data.redis.core.ScanOptions.scanOptions().match(pattern).count(500).build();
-        try (org.springframework.data.redis.core.Cursor<String> cursor = redisTemplate.scan(options)) {
+    private Set<String> scanKeys(String pattern) {
+        Set<String> keys = new HashSet<>();
+        ScanOptions options = ScanOptions.scanOptions().match(pattern).count(500).build();
+        try (Cursor<String> cursor = redisTemplate.scan(options)) {
             while (cursor.hasNext()) {
                 keys.add(cursor.next());
             }
@@ -277,7 +274,7 @@ public class RedisPriceService {
             }
         }
 
-        String key = KEY_PREV_CLOSE + symbol;
+        String key = PriceKeys.prevClose(symbol);
 
         long getStart = stageMetrics.start();
         String value = redisTemplate.opsForValue().get(key);
@@ -296,8 +293,8 @@ public class RedisPriceService {
      * (배치 작업이나 장 마감 시 호출)
      */
     public void setPreviousClose(String symbol, BigDecimal price) {
-        String key = KEY_PREV_CLOSE + symbol;
-        redisTemplate.opsForValue().set(key, price.toPlainString(), TTL_PREV_CLOSE);
+        String key = PriceKeys.prevClose(symbol);
+        redisTemplate.opsForValue().set(key, price.toPlainString(), PriceKeys.PREV_CLOSE_TTL);
         prevCloseCache.remove(symbol);   // 로컬 캐시가 옛 값을 붙들지 않도록 무효화
         log.info("Set previous close: symbol={}, price={}", symbol, price);
     }
@@ -306,19 +303,19 @@ public class RedisPriceService {
      * 전일 종가 일괄 적재 (배치 전용)
      *
      * 다수 종목을 한 번에 채운다. 하루 한 번 도는 배치라 hot path 가 아니므로
-     * 파이프라인 대신 단순 루프로 처리한다(커넥션 풀 미비로 파이프라인이 오히려 느림).
+     * 파이프라인 없이 단순 루프로 처리한다.
      * 심볼당 INFO 로그는 남기지 않고 총계만 반환한다.
      *
      * @param closes symbol -> 전일 종가
      * @return 적재한 종목 수
      */
-    public int loadPreviousCloses(java.util.Map<String, BigDecimal> closes) {
-        for (java.util.Map.Entry<String, BigDecimal> e : closes.entrySet()) {
+    public int loadPreviousCloses(Map<String, BigDecimal> closes) {
+        for (Map.Entry<String, BigDecimal> e : closes.entrySet()) {
             if (e.getValue() == null) {
                 continue;
             }
             redisTemplate.opsForValue().set(
-                    KEY_PREV_CLOSE + e.getKey(), e.getValue().toPlainString(), TTL_PREV_CLOSE);
+                    PriceKeys.prevClose(e.getKey()), e.getValue().toPlainString(), PriceKeys.PREV_CLOSE_TTL);
             prevCloseCache.remove(e.getKey());
         }
         log.info("Loaded previous closes into Redis: count={}", closes.size());
