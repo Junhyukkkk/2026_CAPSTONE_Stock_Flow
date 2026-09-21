@@ -7,8 +7,6 @@ Config 기본값이 그대로 반영하는지 확인한다.
 """
 import importlib
 
-import pytest
-
 _TOPIC_ENV_KEYS = ("KAFKA_TOPIC_NAME", "BINANCE_TOPIC_NAME", "ALPACA_TOPIC_NAME")
 
 
@@ -18,6 +16,8 @@ def _load_config(monkeypatch, **env):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
+    # 개발자의 로컬 .env 가 delenv 한 값을 되살리지 않도록 reload 동안 load_dotenv 를 무력화
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
     import config
     return importlib.reload(config).Config
 
@@ -44,3 +44,12 @@ def test_validate_passes_with_defaults(monkeypatch):
     """예전의 '두 소스 토픽이 같으면 거부' 검증이 사라져 기본 설정으로 기동 가능해야 한다"""
     Config = _load_config(monkeypatch)
     assert Config.validate() is True
+
+
+def test_validate_warns_when_legacy_topic_vars_are_set(monkeypatch, caplog):
+    """옛 소스별 토픽 변수가 남아 있으면 무시하되 경고를 남긴다"""
+    Config = _load_config(monkeypatch, BINANCE_TOPIC_NAME="market.binance.tick")
+    with caplog.at_level("WARNING", logger="config"):
+        assert Config.validate() is True
+    assert "BINANCE_TOPIC_NAME" in caplog.text
+    assert "KAFKA_TOPIC_NAME" in caplog.text

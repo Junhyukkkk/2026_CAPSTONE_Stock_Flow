@@ -85,6 +85,15 @@ class Config:
         if cls.ALPACA_API_SECRET and not cls.ALPACA_API_KEY:
             errors.append("ALPACA_API_KEY가 설정되지 않았습니다")
 
+        # 예전 소스별 토픽 변수는 더 이상 읽지 않는다 (KAFKA_TOPIC_NAME 하나로 통일).
+        # 옛 .env 로 배포하는 경우를 위해 흔적만 남긴다.
+        for legacy in ('BINANCE_TOPIC_NAME', 'ALPACA_TOPIC_NAME'):
+            if os.getenv(legacy):
+                logger.warning(
+                    f"⚠️ {legacy} 는 더 이상 사용되지 않아 무시됩니다. "
+                    f"KAFKA_TOPIC_NAME (현재 '{cls.KAFKA_TOPIC_NAME}') 을 사용하세요"
+                )
+
         if errors:
             for error in errors:
                 print(f"❌ 설정 오류: {error}")

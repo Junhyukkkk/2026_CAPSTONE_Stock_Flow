@@ -4,13 +4,12 @@
 
 ### 패턴
 ```
-market.<source>.<data-type>
+market.<purpose>
 ```
 
 ### 구성 요소
 - `market`: 도메인 접두사 (주식/암호화폐 시장 데이터)
-- `<source>`: 데이터 소스 (binance, alpaca, coinbase 등)
-- `<data-type>`: 데이터 타입 (tick, quote, trade 등)
+- `<purpose>`: 토픽의 역할 (normalized, retry, dlq)
 
 ### 예시
 - `market.normalized`: 정규화된 통합 시세 (Python Producer가 정규화 후 전송, 모든 Consumer가 구독)
@@ -103,8 +102,7 @@ market.dlq: 604800000 (7일)
 ## 8. 확장 전략
 
 ### 향후 추가 가능한 토픽
-- `market.binance.quote`: Binance 호가 데이터
-- `market.alpaca.quote`: Alpaca 호가 데이터
+- `market.normalized.quote`: 호가(quote) 데이터를 체결과 분리해 흘릴 경우
 - `market.aggregated.1min`: 1분봉 집계 데이터
 - `market.aggregated.5min`: 5분봉 집계 데이터
 
