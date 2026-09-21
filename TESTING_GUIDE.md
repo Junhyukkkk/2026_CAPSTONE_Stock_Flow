@@ -10,11 +10,10 @@ http://114.71.51.41:8989
 
 ### 확인할 내용
 1. **Topics** 메뉴 클릭
-2. `market.binance.tick` 토픽 선택
+2. `market.normalized` 토픽 선택
    - Messages 탭에서 실시간 메시지 확인
    - 파티션별 메시지 수 확인
-3. `market.normalized` 토픽 확인
-   - Consumer가 메시지를 받는지 확인
+3. **Consumers** 메뉴에서 `realtime-group`, `storage-group` lag 확인
 
 ---
 
@@ -38,16 +37,6 @@ docker logs -f stockflow-realtime
 
 ## 3. Kafka에서 직접 메시지 확인
 
-### market.binance.tick 토픽 메시지 확인
-```bash
-cd /home/capstone01/capstone/backend/infra
-docker exec -it stockflow-kafka kafka-console-consumer \
-  --bootstrap-server localhost:9092 \
-  --topic market.binance.tick \
-  --from-beginning \
-  --max-messages 5
-```
-
 ### market.normalized 토픽 메시지 확인
 ```bash
 cd /home/capstone01/capstone/backend/infra
@@ -67,7 +56,7 @@ docker exec -it stockflow-kafka kafka-console-consumer \
 cd /home/capstone01/capstone/backend/infra
 docker exec stockflow-kafka kafka-run-class kafka.tools.GetOffsetShell \
   --broker-list localhost:9092 \
-  --topic market.binance.tick
+  --topic market.normalized
 ```
 
 ---

@@ -13,10 +13,12 @@ market.<source>.<data-type>
 - `<data-type>`: 데이터 타입 (tick, quote, trade 등)
 
 ### 예시
-- `market.binance.tick`: Binance 실시간 체결 데이터
-- `market.alpaca.tick`: Alpaca 실시간 체결 데이터
-- `market.normalized`: 정규화된 통합 데이터 (Consumer가 변환)
-- `market.dlq`: Dead Letter Queue (실패한 메시지)
+- `market.normalized`: 정규화된 통합 시세 (Python Producer가 정규화 후 전송, 모든 Consumer가 구독)
+- `market.retry`: Consumer 처리 실패 후 재시도 큐
+- `market.dlq`: Dead Letter Queue (최종 실패 메시지)
+
+소스별 원본 토픽(`market.binance.tick` 등)은 두지 않는다. 정규화는 Producer 안에서
+끝나고, Kafka에는 통합 스키마(NormalizedTradeDTO)만 흐른다.
 
 ## 2. 파티션 전략
 
@@ -29,9 +31,8 @@ market.<source>.<data-type>
 
 | Topic | 파티션 수 | 이유 |
 |-------|----------|------|
-| `market.binance.tick` | 6 | 300종목, 초당 수천 건 예상 |
-| `market.alpaca.tick` | 12 | 전체 종목, 초당 만 건 이상 예상 |
-| `market.normalized` | 12 | 통합 데이터, 높은 처리량 필요 |
+| `market.normalized` | 12 | 통합 시세, Consumer concurrency(12)와 일치 |
+| `market.retry` | 6 | 재시도 메시지는 상대적으로 적음 |
 | `market.dlq` | 3 | 실패 메시지는 상대적으로 적음 |
 
 ### 파티션 키 전략
@@ -50,19 +51,17 @@ market.<source>.<data-type>
 ## 3. Retention 정책
 
 ### Retention 시간
-- **실시간 데이터 토픽** (`market.*.tick`): 4시간
-  - 이유: 실시간 처리 중심, 오래된 데이터 불필요
 - **정규화 토픽** (`market.normalized`): 4시간
-  - 이유: Consumer가 빠르게 소비 후 DB 저장
+  - 이유: Consumer가 빠르게 소비 후 DB 저장. 적체가 4시간을 넘기면 오래된 것부터 삭제된다(조용한 유실).
+- **재시도 토픽** (`market.retry`): 4시간
 - **DLQ** (`market.dlq`): 7일
   - 이유: 디버깅 및 재처리 필요
 
 ### 설정
 ```bash
 # retention.ms (밀리초)
-market.binance.tick: 14400000 (4시간)
-market.alpaca.tick: 14400000 (4시간)
 market.normalized: 14400000 (4시간)
+market.retry: 14400000 (4시간)
 market.dlq: 604800000 (7일)
 ```
 
@@ -113,5 +112,5 @@ market.dlq: 604800000 (7일)
 ```bash
 # 파티션 수 증가 (주의: 키 기반 순서 보장에 영향)
 kafka-topics --alter --bootstrap-server localhost:9092 \
-  --topic market.binance.tick --partitions 12
+  --topic market.normalized --partitions 24
 ```
