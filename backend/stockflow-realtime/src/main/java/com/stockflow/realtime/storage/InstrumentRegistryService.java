@@ -70,15 +70,11 @@ public class InstrumentRegistryService {
     /**
      * register_instrument 실행.
      *
-     * SELECT 는 함수가 void 를 반환해도 결과셋을 돌려주므로 update() 로 호출하면
-     * "A result was returned when none was expected" 예외가 매 호출마다 발생한다.
-     * (함수 자체는 실행되므로 데이터는 반영되고 예외만 삼켜져 왔다.)
+     * SELECT 는 함수가 void 를 반환해도 결과셋을 돌려주므로 반드시 query() 로 호출한다.
+     * update() 로 부르면 "A result was returned when none was expected" 예외가 매 호출마다
+     * 발생한다 (함수 자체는 실행되므로 데이터는 반영되고 예외만 삼켜져 왔던 과거 버그).
      */
     private void register(String symbol, String marketType, String exchange) {
-        if (!opt.isInstrumentRegistryFix()) {
-            jdbcTemplate.update(REGISTER_SQL, symbol, marketType, exchange, symbol);
-            return;
-        }
         jdbcTemplate.query(REGISTER_SQL, rs -> null, symbol, marketType, exchange, symbol);
     }
 

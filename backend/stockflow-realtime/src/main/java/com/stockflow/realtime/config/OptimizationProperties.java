@@ -17,16 +17,6 @@ import org.springframework.stereotype.Component;
 @Data
 public class OptimizationProperties {
 
-    /**
-     * register_instrument 호출을 결과셋을 받는 방식으로 처리한다.
-     *
-     * false 로 두면 jdbcTemplate.update() 로 호출하던 기존 동작을 재현한다.
-     * SELECT 는 항상 결과셋을 반환하므로 update() 는 호출마다 예외를 던진다
-     * (함수는 실행되지만 예외 생성 + WARN 로깅 비용이 매번 발생).
-     * 개선 전후 비교 측정을 위해 남겨둔 플래그이며 기본값은 정상 동작이다.
-     */
-    private boolean instrumentRegistryFix = true;
-
     /** instruments 마스터 재등록을 메모리 캐시로 건너뛴다 */
     private boolean instrumentCache = false;
 
