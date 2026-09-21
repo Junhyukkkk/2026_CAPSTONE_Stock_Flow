@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stockflow.core.metrics.PerformanceMetrics;
 import com.stockflow.core.metrics.PipelineStageMetrics;
 import com.stockflow.core.metrics.PipelineStageMetrics.Stage;
+import com.stockflow.realtime.redis.PriceKeys;
 import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -34,9 +35,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 @Component
 public class RedisMessageListener implements MessageListener {
-
-    private static final String CHANNEL_PREFIX = "price:";
-    private static final String WEBSOCKET_TOPIC_PREFIX = "/topic/price/";
 
     private final SimpMessagingTemplate messagingTemplate;
     private final PipelineStageMetrics stageMetrics;
@@ -72,7 +70,7 @@ public class RedisMessageListener implements MessageListener {
             String body = new String(message.getBody());
 
             // 채널에서 symbol 추출 (price:AAPL -> AAPL)
-            String symbol = extractSymbol(channel);
+            String symbol = PriceKeys.symbolFromChannel(channel);
             if (symbol == null) {
                 log.warn("Invalid channel format: {}", channel);
                 return;
@@ -81,7 +79,7 @@ public class RedisMessageListener implements MessageListener {
             dispatchThreads.add(Thread.currentThread().getName());
 
             // WebSocket으로 전달
-            String destination = WEBSOCKET_TOPIC_PREFIX + symbol;
+            String destination = PriceKeys.wsPriceTopic(symbol);
             long dispatchStart = stageMetrics.start();
             messagingTemplate.convertAndSend(destination, body);
             stageMetrics.record(Stage.WS_DISPATCH, dispatchStart);
@@ -108,12 +106,5 @@ public class RedisMessageListener implements MessageListener {
         } catch (Exception e) {
             log.trace("Failed to record WebSocket E2E latency", e);
         }
-    }
-
-    private String extractSymbol(String channel) {
-        if (channel != null && channel.startsWith(CHANNEL_PREFIX)) {
-            return channel.substring(CHANNEL_PREFIX.length());
-        }
-        return null;
     }
 }
