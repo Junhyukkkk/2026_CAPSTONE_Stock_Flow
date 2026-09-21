@@ -41,12 +41,29 @@ restore() {
     log "원래 컨테이너 복구"
     docker stop "$LIVE" >/dev/null 2>&1; docker rm "$LIVE" >/dev/null 2>&1
     docker rename "$BACKUP" "$LIVE"
+    reset_offsets   # 시험 부하가 남긴 적체를 운영 앱이 떠안지 않게
     docker start "$LIVE" >/dev/null
   fi
   for c in $PAUSE_DURING_BUILD stockflow-binance-collector; do docker start "$c" >/dev/null 2>&1; done
   git -C "$REPO" worktree prune >/dev/null 2>&1
 }
 trap restore EXIT
+
+# 두 컨슈머 그룹의 오프셋을 최신으로 맞춘다 (앱이 멈춘 상태에서만 가능).
+# 시점마다 lag 0 에서 출발하게 해, 앞 시점이 남긴 적체가 다음 시점 측정에 섞이지 않게 한다.
+reset_offsets() {
+  local g
+  for g in realtime-group storage-group; do
+    for _ in $(seq 1 10); do
+      if docker exec stockflow-kafka kafka-consumer-groups --bootstrap-server localhost:9092 \
+           --group "$g" --topic market.normalized --reset-offsets --to-latest --execute >/dev/null 2>&1; then
+        break
+      fi
+      sleep 3   # 그룹 멤버가 아직 빠져나가는 중이면 잠시 후 재시도
+    done
+  done
+  log "컨슈머 오프셋 최신으로 리셋 (lag 0 에서 시작)"
+}
 
 wait_up() {  # $1=timeout(s)
   local n=$(( $1 / 3 ))
@@ -84,11 +101,14 @@ for spec in "$@"; do
   log "════════ $ref → $short ($date_) $subj ════════"
 
   # 1. 그 시점 코드로 이미지 빌드
-  rm -rf "$WT"; git -C "$REPO" worktree prune >/dev/null 2>&1
-  git -C "$REPO" worktree add --detach "$WT" "$short" >/dev/null
-  for c in $PAUSE_DURING_BUILD; do docker stop "$c" >/dev/null 2>&1 || true; done
-  log "빌드: $img"
-  if ! DOCKER_BUILDKIT=1 docker build -q -t "$img" -f "$WT/backend/Dockerfile" "$WT/backend" > "$OUT/$short.build.log" 2>&1; then
+  if ! docker image inspect "$img" >/dev/null 2>&1; then
+    rm -rf "$WT"; git -C "$REPO" worktree prune >/dev/null 2>&1
+    git -C "$REPO" worktree add --detach "$WT" "$short" >/dev/null
+    for c in $PAUSE_DURING_BUILD; do docker stop "$c" >/dev/null 2>&1 || true; done
+  fi
+  if docker image inspect "$img" >/dev/null 2>&1; then
+    log "이미지 재사용: $img"
+  elif ! { log "빌드: $img"; DOCKER_BUILDKIT=1 docker build -q -t "$img" -f "$WT/backend/Dockerfile" "$WT/backend" > "$OUT/$short.build.log" 2>&1; }; then
     log "!! 빌드 실패 → $OUT/$short.build.log"
     echo "| $short | $date_ | $subj | FAILED(build) | | |" >> "$OUT/INDEX.md"
     for c in $PAUSE_DURING_BUILD; do docker start "$c" >/dev/null 2>&1 || true; done
@@ -102,6 +122,7 @@ for spec in "$@"; do
   else
     docker stop "$LIVE" >/dev/null; docker rename "$LIVE" "$BACKUP"
   fi
+  reset_offsets
   docker run -d --name "$LIVE" --network "$NETWORK" -p 8081:8081 \
     --env-file "$OUT/rt.env" "$img" >/dev/null
   if ! wait_up 300; then

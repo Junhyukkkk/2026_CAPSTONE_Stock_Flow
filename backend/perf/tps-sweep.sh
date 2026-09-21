@@ -16,7 +16,7 @@
 # 주요 환경변수 (기본값):
 #   RATES="2000 3000 4000 4300 5000 6000 7000 8000"
 #   HOLD=180  DRAIN_WAIT=150  SETTLE=30  SAMPLE_INTERVAL=5
-#   WORKERS=6  SYMBOLS=50  STOP_COLLECTORS=1
+#   WORKERS=6  SYMBOLS=50  STOP_COLLECTORS=1  FORCE_CLI=0 (1이면 앱 지표 대신 브로커 CLI로 측정)
 #   NETWORK=infra_default  LOADGEN_IMAGE=collectors-binance-collector:latest
 #   COLLECTORS_DIR=/home/capstone01/capstone/collectors
 #   APP_C=stockflow-realtime  KAFKA_C=stockflow-kafka  REDIS_C=stockflow-redis  PG_C=stockflow-timescaledb
@@ -120,7 +120,9 @@ wait_health() {
 } > "$OUT/env.txt" 2>&1
 log "환경 → $OUT/env.txt"
 wait_health
-if [ "$(app_prom | grep -c '^kafka_consumer_fetch_manager_records_consumed_total{' || true)" = "0" ]; then
+if [ "${FORCE_CLI:-0}" = 1 ]; then
+  USE_CLI=1; log "FORCE_CLI=1 → 소비/적체를 Kafka 브로커(kafka-consumer-groups) 기준으로 측정"
+elif [ "$(app_prom | grep -c '^kafka_consumer_fetch_manager_records_consumed_total{' || true)" = "0" ]; then
   USE_CLI=1; log "앱에 Kafka 컨슈머 지표 없음 → kafka-consumer-groups CLI 로 소비/적체 측정"
 fi
 
