@@ -63,11 +63,24 @@ prom_sum() { awk '$0 !~ /^#/ { v=$NF; if (v+0==v) s+=v } END { printf "%.0f", s 
 # 비어 있는지를 먼저 확인해 빈 문자열을 전파한다 — 호출부의 l=${l:-...} 폴백이 실제로
 # "값을 모름(=drained 아님으로 취급)"에 걸리도록 하기 위함. sampler()의 prom_prev 재사용과
 # 같은 문제(빈 응답을 유효한 0으로 착각)를 다른 방식으로 해결한다.
+# 옛 버전 앱(3월)은 Kafka 컨슈머 지표(kafka_consumer_fetch_manager_*)를 노출하지 않는다.
+# 그런 경우 kafka-consumer-groups CLI 로 대체한다: CURRENT-OFFSET 합 = 소비 누적,
+# LAG 합 = 적체. 시작 시 지표 유무를 한 번 확인해 USE_CLI 를 정한다.
+cg_describe() { docker exec "$KAFKA_C" kafka-consumer-groups --bootstrap-server "$KAFKA_BOOTSTRAP" --group "$1-group" --describe 2>/dev/null; }
+cg_sum() {  # $1=describe 출력, $2=consumed_total|lag
+  echo "$1" | awk -v t="$TOPIC" -v k="$2" '$2==t { if (k=="lag" && $6 ~ /^[0-9]+$/) s+=$6; if (k=="consumed_total" && $4 ~ /^[0-9]+$/) s+=$4 } END { print s+0 }'
+}
+USE_CLI=0   # 앱 기동 확인 후(wait_health 다음) 지표 유무로 결정
 total_lag() {
   local prom
+  if [ "$USE_CLI" = 1 ]; then cg_sum "$(cg_describe "$1")" lag; return 0; fi
   prom=$(app_prom)
   [ -z "$prom" ] && return 0
-  echo "$prom" | grep '^kafka_consumer_fetch_manager_records_lag{' | grep "$1-group" | prom_sum
+  echo "$prom" | { grep '^kafka_consumer_fetch_manager_records_lag{' || true; } | { grep "$1-group" || true; } | prom_sum
+}
+consumed_total() {  # $1=realtime|storage  $2=스냅샷 .prom 파일
+  if [ "$USE_CLI" = 1 ]; then cg_sum "$(cg_describe "$1")" consumed_total; return 0; fi
+  { grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$2" || true; } | { grep "$1-group" || true; } | prom_sum
 }
 
 run_loadgen() {  # $1=rate $2=duration $3=logfile
@@ -107,6 +120,9 @@ wait_health() {
 } > "$OUT/env.txt" 2>&1
 log "환경 → $OUT/env.txt"
 wait_health
+if [ "$(app_prom | grep -c '^kafka_consumer_fetch_manager_records_consumed_total{' || true)" = "0" ]; then
+  USE_CLI=1; log "앱에 Kafka 컨슈머 지표 없음 → kafka-consumer-groups CLI 로 소비/적체 측정"
+fi
 
 # ── 1. 파티션 조정 (옵션) ───────────────────────────────────────
 CUR_PARTS=$(docker exec "$KAFKA_C" kafka-topics --bootstrap-server "$KAFKA_BOOTSTRAP" \
@@ -151,7 +167,15 @@ sampler() {
     stats=$(timeout 25 docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' "$APP_C" "$KAFKA_C" "$REDIS_C" "$PG_C" 2>/dev/null)
     free_out=$(free -m 2>/dev/null)
     ph=$(cat "$PHASEF" 2>/dev/null); ph=${ph:-idle 0}
-    g() { echo "$prom" | grep "^kafka_consumer_fetch_manager_records_$1{" | grep "$2-group" | prom_sum; }
+    local d_rt="" d_st=""
+    if [ "$USE_CLI" = 1 ]; then d_rt=$(cg_describe realtime); d_st=$(cg_describe storage); fi
+    g() {
+      if [ "$USE_CLI" = 1 ]; then
+        if [ "$2" = realtime ]; then cg_sum "$d_rt" "$1"; else cg_sum "$d_st" "$1"; fi
+      else
+        echo "$prom" | { grep "^kafka_consumer_fetch_manager_records_$1{" || true; } | { grep "$2-group" || true; } | prom_sum
+      fi
+    }
     pv() { echo "$prom" | awk -v m="$1" '$0 ~ "^"m"([ {])" && $0 !~ /^#/ {print $NF; exit}'; }
     rf() { echo "$redis" | awk -F: -v k="$1" '$1==k{gsub(/[^0-9.]/,"",$2); print $2; exit}'; }
     cpu() { echo "$stats" | awk -v n="$1" '$1==n{gsub(/%/,"",$2); print $2+0; exit}'; }
@@ -168,8 +192,8 @@ for RATE in $RATES; do
   setphase snapA "$RATE"
   "$SCRIPT_DIR/snapshot.sh" "$OUT/${RATE}_A" >/dev/null
   a_epoch=$(date +%s)
-  a_rt=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_A.prom" | grep realtime-group | prom_sum)
-  a_st=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_A.prom" | grep storage-group | prom_sum)
+  a_rt=$(consumed_total realtime "$OUT/${RATE}_A.prom")
+  a_st=$(consumed_total storage "$OUT/${RATE}_A.prom")
 
   setphase hold "$RATE"
   run_loadgen "$RATE" "$HOLD" "$OUT/${RATE}_loadgen.log" || log "!! loadgen 비정상 종료"
@@ -179,8 +203,8 @@ for RATE in $RATES; do
 
   setphase drain "$RATE"
   "$SCRIPT_DIR/snapshot.sh" "$OUT/${RATE}_B" >/dev/null
-  b_rt=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_B.prom" | grep realtime-group | prom_sum)
-  b_st=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_B.prom" | grep storage-group | prom_sum)
+  b_rt=$(consumed_total realtime "$OUT/${RATE}_B.prom")
+  b_st=$(consumed_total storage "$OUT/${RATE}_B.prom")
   dt=$((b_epoch - a_epoch)); [ "$dt" -lt 1 ] && dt=1
   crt=$(awk "BEGIN{printf \"%.0f\",($b_rt-$a_rt)/$dt}")
   cst=$(awk "BEGIN{printf \"%.0f\",($b_st-$a_st)/$dt}")
