@@ -20,8 +20,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * register_instrument 는 ON CONFLICT DO UPDATE 이므로 호출할 때마다 write 가 발생한다.
  * 캐시가 없으면 배치마다 같은 심볼을 재등록해 소수의 행에 UPDATE 가 누적되고,
  * 행 잠금 경합과 autovacuum 부하로 이어진다.
- * {@code stockflow.opt.instrument-cache=true} 로 켜면 심볼별 마지막 등록 시각을
- * 메모리에 두고 갱신 주기가 지난 경우에만 호출한다.
+ * 기본으로 켜져 있는 {@code stockflow.opt.instrument-cache} 는 심볼별 마지막 등록 시각을
+ * 메모리에 두고 갱신 주기가 지난 경우에만 호출한다 (비교 측정 시 {@code =false} 로 끈다).
  */
 @Slf4j
 @Service
