@@ -11,9 +11,11 @@
 # 사용법:
 #   ./bench.sh <LABEL> [APP_ENV=val ...]
 #
-# 예:
-#   ./bench.sh baseline STOCKFLOW_OPT_INSTRUMENT_REGISTRY_FIX=false
-#   ./bench.sh tuned STOCKFLOW_OPT_INSTRUMENT_CACHE=true STOCKFLOW_OPT_WS_TASK_EXECUTOR=true
+# 예 (개선안 토글은 기본 전부 켜져 있으므로, 개선 전 조건은 명시적으로 끈다):
+#   ./bench.sh tuned
+#   ./bench.sh baseline STOCKFLOW_OPT_INSTRUMENT_CACHE=false STOCKFLOW_OPT_PREV_CLOSE_LOCAL_CACHE=false \
+#                       STOCKFLOW_OPT_WS_TASK_EXECUTOR=false STOCKFLOW_OPT_REDIS_PIPELINE=false \
+#                       STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=false
 #
 # 환경변수:
 #   RATE(500) MEASURE_DURATION(120) WARMUP_DURATION(20) LINGER_MS(10) SYMBOLS(50)
