@@ -1,10 +1,24 @@
 /* StockFlow 프론트엔드 공통 유틸 + API 래퍼 */
 
+async function apiError(res) {
+    const raw = await res.text();
+    let message = raw;
+    try {
+        const payload = JSON.parse(raw);
+        message = payload.detail || payload.message || payload.title || raw;
+    } catch (_) {
+        // Plain-text error responses are already usable.
+    }
+    const error = new Error(message || `요청 처리에 실패했습니다. (${res.status})`);
+    error.status = res.status;
+    return error;
+}
+
 const API = {
     async get(path) {
         const res = await fetch(path, { headers: { 'Accept': 'application/json' } });
         if (res.status === 404) return null;
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        if (!res.ok) throw await apiError(res);
         return res.json();
     },
     async post(path, body) {
@@ -13,7 +27,7 @@ const API = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
-        if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+        if (!res.ok) throw await apiError(res);
         return res.status === 204 ? null : res.json();
     },
     async del(path) {
@@ -42,10 +56,15 @@ const API = {
     createStrategy: (body) => API.post('/api/backtest/strategies', body),
     deleteStrategy: (id) => API.del(`/api/backtest/strategies/${id}`),
     runAdHoc: (body) => API.post('/api/backtest/run', body),
+    performanceReport: (body) => API.post('/api/backtest/performance-report', body),
+    thresholdReport: (body) => API.post('/api/backtest/performance-report/thresholds', body),
     runSaved: (id, from, to) =>
         API.post(`/api/backtest/strategies/${id}/run?from=${from}&to=${to}`, {}),
     runTrades: (runId) => API.get(`/api/backtest/runs/${runId}/trades`),
     equityCurve: (runId) => API.get(`/api/backtest/runs/${runId}/equity-curve`),
+    predictionPoints: (runId) => API.get(`/api/backtest/runs/${runId}/prediction-points`),
+    predictionCompare: (symbol, interval, horizon) =>
+        API.get(`/api/predictions/${encodeURIComponent(symbol)}/compare?interval=${interval}&horizon=${horizon}`),
 };
 
 // ---- 포맷 헬퍼 ----

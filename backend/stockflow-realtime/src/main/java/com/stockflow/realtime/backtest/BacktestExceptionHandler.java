@@ -1,5 +1,6 @@
 package com.stockflow.realtime.backtest;
 
+import com.stockflow.realtime.prediction.PredictionService.PredictionServiceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -22,6 +23,11 @@ public class BacktestExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleBadRequest(IllegalArgumentException ex) {
         return problem(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(PredictionServiceException.class)
+    public ProblemDetail handlePredictionService(PredictionServiceException ex) {
+        return problem(ex.getStatus(), ex.getMessage());
     }
 
     private ProblemDetail problem(HttpStatus status, String detail) {

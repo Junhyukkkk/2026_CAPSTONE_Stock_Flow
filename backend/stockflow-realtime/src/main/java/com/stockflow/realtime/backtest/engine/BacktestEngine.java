@@ -33,6 +33,11 @@ public class BacktestEngine {
      * @param initialCash 초기 자본
      */
     public BacktestResult run(List<Bar> bars, List<Signal> signals, BigDecimal initialCash) {
+        return run(bars, signals, initialCash, ExecutionConfig.atCloseWithoutCosts());
+    }
+
+    public BacktestResult run(List<Bar> bars, List<Signal> signals, BigDecimal initialCash,
+                              ExecutionConfig config) {
         if (bars == null || bars.isEmpty()) {
             throw new IllegalArgumentException("bars must not be empty");
         }
@@ -42,10 +47,13 @@ public class BacktestEngine {
         if (initialCash == null || initialCash.signum() <= 0) {
             throw new IllegalArgumentException("initialCash must be positive");
         }
+        if (config == null) {
+            throw new IllegalArgumentException("execution config must not be null");
+        }
 
         BigDecimal cash = initialCash;
         BigDecimal quantity = BigDecimal.ZERO;
-        BigDecimal entryPrice = null; // 현재 보유 포지션의 매수가
+        BigDecimal entryCost = null;
 
         List<BacktestResult.Trade> trades = new ArrayList<>();
         List<BacktestResult.EquityPoint> curve = new ArrayList<>(bars.size());
@@ -60,31 +68,44 @@ public class BacktestEngine {
             Bar bar = bars.get(i);
             BigDecimal close = bar.close();
             Signal signal = signals.get(i);
+            BigDecimal marketPrice = config.atOpen() ? bar.open() : close;
+            if (marketPrice == null || marketPrice.signum() <= 0) {
+                throw new IllegalArgumentException("execution price must be positive");
+            }
 
             boolean holding = quantity.signum() > 0;
 
             if (signal == Signal.BUY && !holding && cash.signum() > 0) {
-                quantity = cash.divide(close, MC);
-                entryPrice = close;
+                BigDecimal executionPrice = marketPrice.multiply(
+                        BigDecimal.ONE.add(config.slippageRate()), MC);
+                BigDecimal costPerUnit = executionPrice.multiply(
+                        BigDecimal.ONE.add(config.feeRate()), MC);
+                entryCost = cash;
+                quantity = cash.divide(costPerUnit, MC);
                 cash = BigDecimal.ZERO;
                 BigDecimal equity = equity(cash, quantity, close);
                 trades.add(new BacktestResult.Trade(
                         ++seq, bar.date(), BacktestResult.Side.BUY,
-                        close, quantity, cash, equity, null));
+                        scale(executionPrice), quantity, cash, equity, null));
             } else if (signal == Signal.SELL && holding) {
-                BigDecimal proceeds = quantity.multiply(close, MC);
-                BigDecimal pnlPct = percentChange(entryPrice, close);
-                cash = cash.add(proceeds, MC);
+                BigDecimal executionPrice = marketPrice.multiply(
+                        BigDecimal.ONE.subtract(config.slippageRate()), MC);
+                BigDecimal soldQuantity = quantity;
+                BigDecimal grossProceeds = soldQuantity.multiply(executionPrice, MC);
+                BigDecimal netProceeds = grossProceeds.multiply(
+                        BigDecimal.ONE.subtract(config.feeRate()), MC);
+                BigDecimal pnlPct = percentChange(entryCost, netProceeds);
+                cash = cash.add(netProceeds, MC);
                 quantity = BigDecimal.ZERO;
                 BigDecimal equity = equity(cash, quantity, close);
                 trades.add(new BacktestResult.Trade(
                         ++seq, bar.date(), BacktestResult.Side.SELL,
-                        close, proceeds.divide(close, MC), cash, equity, pnlPct));
+                        scale(executionPrice), soldQuantity, cash, equity, pnlPct));
                 roundTrips++;
                 if (pnlPct.signum() > 0) {
                     wins++;
                 }
-                entryPrice = null;
+                entryCost = null;
             }
 
             BigDecimal equity = equity(cash, quantity, close);
@@ -151,5 +172,28 @@ public class BacktestEngine {
 
     private static BigDecimal scale(BigDecimal value) {
         return value.setScale(8, RoundingMode.HALF_UP);
+    }
+
+    public record ExecutionConfig(boolean atOpen, BigDecimal feeRate, BigDecimal slippageRate) {
+        public ExecutionConfig {
+            if (feeRate == null || slippageRate == null
+                    || feeRate.signum() < 0 || slippageRate.signum() < 0
+                    || feeRate.compareTo(BigDecimal.ONE) >= 0
+                    || slippageRate.compareTo(BigDecimal.ONE) >= 0) {
+                throw new IllegalArgumentException("fee and slippage rates must be in [0, 1)");
+            }
+        }
+
+        public static ExecutionConfig atCloseWithoutCosts() {
+            return new ExecutionConfig(false, BigDecimal.ZERO, BigDecimal.ZERO);
+        }
+
+        public static ExecutionConfig atOpenWithCosts(BigDecimal feeBps, BigDecimal slippageBps) {
+            BigDecimal bpsDivisor = BigDecimal.valueOf(10000);
+            return new ExecutionConfig(
+                    true,
+                    feeBps.divide(bpsDivisor, MC),
+                    slippageBps.divide(bpsDivisor, MC));
+        }
     }
 }

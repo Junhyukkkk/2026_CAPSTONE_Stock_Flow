@@ -18,7 +18,7 @@ public class StrategyRequest {
     @NotBlank
     private String symbol;
 
-    /** BUY_AND_HOLD | MA_CROSSOVER | RSI */
+    /** BUY_AND_HOLD | MA_CROSSOVER | RSI | PREDICTION */
     @NotBlank
     private String strategyType;
 

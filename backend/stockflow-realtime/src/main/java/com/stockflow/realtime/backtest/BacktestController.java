@@ -2,9 +2,14 @@ package com.stockflow.realtime.backtest;
 
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
+import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
+import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
+import com.stockflow.realtime.backtest.dto.PerformanceReportResponse;
 import com.stockflow.realtime.backtest.dto.RunRequest;
 import com.stockflow.realtime.backtest.dto.StrategyRequest;
 import com.stockflow.realtime.backtest.dto.StrategyResponse;
+import com.stockflow.realtime.backtest.dto.ThresholdReportRequest;
+import com.stockflow.realtime.backtest.dto.ThresholdReportResponse;
 import com.stockflow.realtime.backtest.dto.TradeResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -92,6 +97,22 @@ public class BacktestController {
         return ResponseEntity.ok(runService.runAdHoc(request));
     }
 
+    @PostMapping("/performance-report")
+    @Operation(summary = "종목별 예측 성능 리포트 생성",
+            description = "대표 암호화폐에 Buy & Hold와 세 예측 모델을 동일 조건으로 실행해 성과를 집계합니다.")
+    public ResponseEntity<PerformanceReportResponse> generatePerformanceReport(
+            @Valid @RequestBody PerformanceReportRequest request) {
+        return ResponseEntity.ok(runService.generatePerformanceReport(request));
+    }
+
+    @PostMapping("/performance-report/thresholds")
+    @Operation(summary = "신호 기준 계수 비교 리포트 생성",
+            description = "선택한 예측 모델에 0.15, 0.25, 0.35 기준 계수를 적용해 대표 암호화폐 성과를 비교합니다.")
+    public ResponseEntity<ThresholdReportResponse> generateThresholdReport(
+            @Valid @RequestBody ThresholdReportRequest request) {
+        return ResponseEntity.ok(runService.generateThresholdReport(request));
+    }
+
     @GetMapping("/strategies/{id}/runs")
     @Operation(summary = "전략별 실행 이력 조회")
     public List<BacktestRunResponse> listRunsByStrategy(@PathVariable long id) {
@@ -121,6 +142,15 @@ public class BacktestController {
     @Operation(summary = "자산 곡선 조회", description = "일자별 평가금액·낙폭(시각화용 데이터)을 조회합니다.")
     public ResponseEntity<List<EquityPointResponse>> getEquityCurve(@PathVariable long runId) {
         return runService.getEquityCurve(runId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/runs/{runId}/prediction-points")
+    @Operation(summary = "예측 분석 포인트 조회",
+            description = "예측 전략 실행의 날짜별 예측가, 기준가, 신호, 임계값을 조회합니다.")
+    public ResponseEntity<List<PredictionPointResponse>> getPredictionPoints(@PathVariable long runId) {
+        return runService.getPredictionPoints(runId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }

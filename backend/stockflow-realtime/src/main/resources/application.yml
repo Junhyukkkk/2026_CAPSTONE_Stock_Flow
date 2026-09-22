@@ -137,6 +137,11 @@ batch:
   scheduler:
     enabled: ${BATCH_SCHEDULER_ENABLED:true}
 
+analysis:
+  base-url: ${ANALYSIS_BASE_URL:http://localhost:8000}
+  connect-timeout-ms: ${ANALYSIS_CONNECT_TIMEOUT_MS:3000}
+  read-timeout-ms: ${ANALYSIS_READ_TIMEOUT_MS:120000}
+
 # Retry Policy 설정 (RetryPolicyConfig에서 참조)
 retry:
   mode: ${RETRY_MODE:sync}

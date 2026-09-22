@@ -7,26 +7,11 @@ import lombok.Getter;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.Map;
+import java.util.List;
 
-/**
- * 저장하지 않고 즉석으로 실행하는 ad-hoc 백테스트 요청.
- */
+/** 선택한 예측 모델의 신호 기준 계수 비교 요청. */
 @Getter
-public class RunRequest {
-
-    @NotBlank
-    private String symbol;
-
-    /** BUY_AND_HOLD | MA_CROSSOVER | RSI | PREDICTION */
-    @NotBlank
-    private String strategyType;
-
-    private Map<String, Object> params;
-
-    /** 미지정 시 10000. */
-    private BigDecimal initialCash;
-
+public class ThresholdReportRequest {
     @NotNull
     @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate from;
@@ -34,4 +19,10 @@ public class RunRequest {
     @NotNull
     @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate to;
+
+    @NotBlank
+    private String model;
+
+    private List<String> symbols;
+    private BigDecimal initialCash;
 }
