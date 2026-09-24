@@ -56,6 +56,10 @@ const API = {
     createStrategy: (body) => API.post('/api/backtest/strategies', body),
     deleteStrategy: (id) => API.del(`/api/backtest/strategies/${id}`),
     runAdHoc: (body) => API.post('/api/backtest/run', body),
+    backtestReadiness: (symbol, from, to, minimumHistoryDays = 0, source = 'BINANCE') =>
+        API.get(`/api/backtest/readiness?symbol=${encodeURIComponent(symbol)}`
+            + `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+            + `&source=${encodeURIComponent(source)}&minimumHistoryDays=${minimumHistoryDays}`),
     performanceReport: (body) => API.post('/api/backtest/performance-report', body),
     thresholdReport: (body) => API.post('/api/backtest/performance-report/thresholds', body),
     runSaved: (id, from, to) =>

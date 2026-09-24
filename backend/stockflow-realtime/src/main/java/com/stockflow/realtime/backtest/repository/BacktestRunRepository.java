@@ -73,6 +73,29 @@ public class BacktestRunRepository {
         return count == null ? 0 : count;
     }
 
+    /** 심볼별 저장 일봉 범위와 실제 관측치 수를 반환한다. */
+    public DataCoverage findCoverage(String symbol, String source) {
+        return jdbcTemplate.query(
+                """
+                SELECT MIN(trade_date) AS first_date,
+                       MAX(trade_date) AS last_date,
+                       COUNT(DISTINCT trade_date) AS bar_count
+                FROM symbol_daily_ohlcv
+                WHERE symbol = ?
+                  AND source = ?
+                """,
+                rs -> {
+                    if (!rs.next() || rs.getDate("first_date") == null) {
+                        return new DataCoverage(null, null, 0);
+                    }
+                    return new DataCoverage(
+                            rs.getDate("first_date").toLocalDate(),
+                            rs.getDate("last_date").toLocalDate(),
+                            rs.getInt("bar_count"));
+                },
+                symbol.toUpperCase(), source);
+    }
+
     /**
      * 실행 결과 헤더와 체결/자산곡선을 한 트랜잭션으로 저장하고 run id 를 반환한다.
      */
@@ -324,6 +347,13 @@ public class BacktestRunRepository {
             LocalDate tradeDate,
             BigDecimal equity,
             BigDecimal drawdownPct
+    ) {
+    }
+
+    public record DataCoverage(
+            LocalDate firstDate,
+            LocalDate lastDate,
+            int barCount
     ) {
     }
 

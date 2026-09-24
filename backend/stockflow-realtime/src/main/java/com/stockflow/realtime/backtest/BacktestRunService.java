@@ -1,6 +1,7 @@
 package com.stockflow.realtime.backtest;
 
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
+import com.stockflow.realtime.backtest.dto.BacktestDataReadinessResponse;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
 import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
@@ -21,6 +22,7 @@ import com.stockflow.realtime.backtest.engine.strategy.TradingStrategy;
 import com.stockflow.realtime.backtest.model.StrategyType;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository.EquityRow;
+import com.stockflow.realtime.backtest.repository.BacktestRunRepository.DataCoverage;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository.PredictionPointRow;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository.RunRow;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository.TradeRow;
@@ -35,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.HashMap;
@@ -86,6 +89,55 @@ public class BacktestRunService {
         StrategyType type = StrategyType.from(req.getStrategyType());
         BigDecimal initialCash = req.getInitialCash() != null ? req.getInitialCash() : DEFAULT_INITIAL_CASH;
         return execute(null, req.getSymbol(), type, req.getParams(), initialCash, req.getFrom(), req.getTo());
+    }
+
+    /**
+     * 실행 전 화면에서 사용하는 일봉 데이터 준비 상태 조회.
+     * 실행 로직과 같은 source·실제 관측치 기준으로 계산하지만, 이 메서드는 데이터를 변경하지 않는다.
+     */
+    public BacktestDataReadinessResponse inspectDataReadiness(
+            String symbol, LocalDate from, LocalDate to, String source, int minimumHistoryDays) {
+        validateRange(from, to);
+        if (minimumHistoryDays < 0) {
+            throw new IllegalArgumentException("minimumHistoryDays must be zero or greater");
+        }
+
+        String normalizedSymbol = symbol == null ? "" : symbol.trim().toUpperCase(Locale.ROOT);
+        if (normalizedSymbol.isEmpty()) {
+            throw new IllegalArgumentException("symbol is required");
+        }
+        String resolvedSource = source == null || source.isBlank()
+                ? DEFAULT_SOURCE : source.trim().toUpperCase(Locale.ROOT);
+        List<Bar> selectedBars = runRepository.loadBars(normalizedSymbol, resolvedSource, from, to);
+        int historyBarCount = runRepository.countBarsBefore(normalizedSymbol, resolvedSource, from);
+        DataCoverage coverage = runRepository.findCoverage(normalizedSymbol, resolvedSource);
+        int expectedBarCount = Math.toIntExact(ChronoUnit.DAYS.between(from, to) + 1);
+        int missingBarCount = Math.max(0, expectedBarCount - selectedBars.size());
+
+        boolean hasSelectedBars = !selectedBars.isEmpty();
+        boolean hasRequiredHistory = minimumHistoryDays == 0 || historyBarCount >= minimumHistoryDays;
+        boolean canRun = hasSelectedBars && hasRequiredHistory;
+        String status;
+        String message;
+        if (!hasSelectedBars) {
+            status = "BLOCKED";
+            message = "선택한 기간에 사용할 수 있는 일봉 데이터가 없습니다.";
+        } else if (!hasRequiredHistory) {
+            status = "BLOCKED";
+            message = "시작일 이전의 실제 학습 데이터가 부족합니다.";
+        } else if (missingBarCount > 0) {
+            status = "WARNING";
+            message = "선택한 구간에 누락된 일봉이 있어 결과 해석에 주의가 필요합니다.";
+        } else {
+            status = "READY";
+            message = "선택한 조건으로 백테스트를 실행할 수 있습니다.";
+        }
+
+        return new BacktestDataReadinessResponse(
+                normalizedSymbol, resolvedSource, from, to,
+                coverage.firstDate(), coverage.lastDate(),
+                selectedBars.size(), expectedBarCount, missingBarCount,
+                historyBarCount, minimumHistoryDays, canRun, status, message);
     }
 
     /** 동일 조건으로 대표 암호화폐와 예측 모델의 성과를 일괄 집계한다. */

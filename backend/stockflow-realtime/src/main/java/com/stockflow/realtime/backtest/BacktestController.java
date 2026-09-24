@@ -1,6 +1,7 @@
 package com.stockflow.realtime.backtest;
 
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
+import com.stockflow.realtime.backtest.dto.BacktestDataReadinessResponse;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
 import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
@@ -95,6 +96,19 @@ public class BacktestController {
             description = "전략을 저장하지 않고 요청 본문의 설정으로 백테스트를 실행합니다.")
     public ResponseEntity<BacktestRunResponse> runAdHoc(@Valid @RequestBody RunRequest request) {
         return ResponseEntity.ok(runService.runAdHoc(request));
+    }
+
+    @GetMapping("/readiness")
+    @Operation(summary = "백테스트 데이터 준비 상태 조회",
+            description = "선택 기간의 실제 일봉 수, 시작일 이전 학습 데이터 수, 누락 여부를 실행 전에 조회합니다.")
+    public ResponseEntity<BacktestDataReadinessResponse> getDataReadiness(
+            @RequestParam String symbol,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "BINANCE") String source,
+            @RequestParam(defaultValue = "0") int minimumHistoryDays) {
+        return ResponseEntity.ok(
+                runService.inspectDataReadiness(symbol, from, to, source, minimumHistoryDays));
     }
 
     @PostMapping("/performance-report")
