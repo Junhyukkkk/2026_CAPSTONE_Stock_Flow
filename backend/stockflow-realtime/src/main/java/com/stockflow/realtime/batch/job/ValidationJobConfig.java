@@ -21,10 +21,12 @@ import org.springframework.transaction.PlatformTransactionManager;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 데이터 정합성 검증 Job.
@@ -283,17 +285,36 @@ public class ValidationJobConfig {
     @Bean
     public Step backtestReadinessStep() {
         return new StepBuilder("backtestReadinessStep", jobRepository)
-                .tasklet(backtestReadinessTasklet(null), transactionManager)
+                .tasklet(backtestReadinessTasklet(null, null), transactionManager)
                 .build();
     }
 
     @Bean
     @StepScope
     public Tasklet backtestReadinessTasklet(
-            @Value("#{jobParameters['targetDate']}") String targetDate) {
+            @Value("#{jobParameters['targetDate']}") String targetDate,
+            @Value("${backtest.readiness.symbols}") String monitoredSymbols) {
 
         return (contribution, chunkContext) -> {
             LocalDate target = LocalDate.parse(targetDate);
+            List<String> symbols = Arrays.stream(monitoredSymbols.split(","))
+                    .map(String::trim)
+                    .filter(symbol -> !symbol.isEmpty())
+                    .map(String::toUpperCase)
+                    .distinct()
+                    .toList();
+            if (symbols.isEmpty()) {
+                throw new IllegalStateException("backtest.readiness.symbols must not be empty");
+            }
+
+            String placeholders = symbols.stream()
+                    .map(ignored -> "?")
+                    .collect(Collectors.joining(", "));
+            List<Object> parameters = new ArrayList<>();
+            parameters.add(Date.valueOf(target));
+            parameters.addAll(symbols);
+            parameters.add(Date.valueOf(target));
+
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                     """
                     SELECT
@@ -309,11 +330,13 @@ public class ValidationJobConfig {
                         ) AS internal_gap_days
                     FROM symbol_daily_ohlcv
                     WHERE market_type = 'CRYPTO'
+                      AND source = 'BINANCE'
+                      AND symbol IN (%s)
                       AND trade_date <= ?::date
                     GROUP BY symbol, source
-                    ORDER BY symbol, source
-                    """,
-                    Date.valueOf(target), Date.valueOf(target)
+                    ORDER BY symbol
+                    """.formatted(placeholders),
+                    parameters.toArray()
             );
 
             final int minimumHistoryDays = 50;
@@ -348,18 +371,20 @@ public class ValidationJobConfig {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("targetDate", targetDate);
             result.put("marketType", "CRYPTO");
+            result.put("source", "BINANCE");
+            result.put("monitoredSymbols", symbols);
             result.put("minimumHistoryDays", minimumHistoryDays);
-            result.put("symbolSourceCount", rows.size());
+            result.put("symbolCount", rows.size());
             result.put("readyCount", readyCount);
             result.put("attentionCount", attention.size());
             result.put("attention", attention);
             saveValidationResult("backtest_readiness", targetDate, result);
 
             if (attention.isEmpty()) {
-                log.info("Backtest readiness PASS: {} crypto symbol-source pairs ready on {}",
+                log.info("Backtest readiness PASS: {} monitored crypto symbols ready on {}",
                         readyCount, target);
             } else {
-                log.warn("Backtest readiness WARN: {}/{} crypto symbol-source pairs need attention on {}: {}",
+                log.warn("Backtest readiness WARN: {}/{} monitored crypto symbols need attention on {}: {}",
                         attention.size(), rows.size(), target, attention);
             }
 
