@@ -116,7 +116,8 @@ public class BacktestRunService {
 
         boolean hasSelectedBars = !selectedBars.isEmpty();
         boolean hasRequiredHistory = minimumHistoryDays == 0 || historyBarCount >= minimumHistoryDays;
-        boolean canRun = hasSelectedBars && hasRequiredHistory;
+        boolean hasCompleteSelectedRange = missingBarCount == 0;
+        boolean canRun = hasSelectedBars && hasRequiredHistory && hasCompleteSelectedRange;
         String status;
         String message;
         if (!hasSelectedBars) {
@@ -125,9 +126,9 @@ public class BacktestRunService {
         } else if (!hasRequiredHistory) {
             status = "BLOCKED";
             message = "시작일 이전의 실제 학습 데이터가 부족합니다.";
-        } else if (missingBarCount > 0) {
-            status = "WARNING";
-            message = "선택한 구간에 누락된 일봉이 있어 결과 해석에 주의가 필요합니다.";
+        } else if (!hasCompleteSelectedRange) {
+            status = "BLOCKED";
+            message = "선택한 구간에 누락된 일봉이 있어 예측 백테스트를 실행할 수 없습니다.";
         } else {
             status = "READY";
             message = "선택한 조건으로 백테스트를 실행할 수 있습니다.";
