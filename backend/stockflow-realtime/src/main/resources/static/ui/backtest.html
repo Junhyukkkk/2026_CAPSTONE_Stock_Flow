@@ -62,6 +62,7 @@
                 <button class="btn" id="runBtn" onclick="runBacktest()">선택 모델 실행</button>
                 <button class="btn-ghost" id="compareBtn" onclick="runComparison()">예측 모델 비교</button>
                 <button class="btn-ghost" id="reportBtn" onclick="runPerformanceReport()">대표 코인 성과 리포트</button>
+                <button class="btn-ghost" id="allCryptoReportBtn" onclick="runAllCryptoPerformanceReport()">전체 코인 자동 리포트</button>
                 <button class="btn-ghost" id="thresholdBtn" onclick="runThresholdReport()">신호 기준 계수 비교</button>
                 <button class="btn-ghost" onclick="saveStrategy()">전략 저장</button>
             </div>
@@ -93,9 +94,11 @@
         </div>
     </div>
 
+    <div id="performanceReportJob" class="readiness hidden mt-16" aria-live="polite"></div>
+
     <div id="performanceReport" class="card mt-16 hidden">
         <div class="flex-between">
-            <h3>대표 코인 성능 리포트</h3>
+            <h3 id="performanceReportTitle">대표 코인 성능 리포트</h3>
             <span class="muted" id="performanceReportMeta"></span>
         </div>
         <div class="report-note">동일 조건으로 Buy & Hold와 세 예측 모델을 실행한 결과입니다. 수수료 10bp, 슬리피지 5bp가 반영됩니다.</div>
@@ -178,7 +181,7 @@
     </div>
 </div>
 
-<script src=assets/api.js?report-universe-20260924></script>
+<script src="assets/api.js?performance-report-jobs-20260925"></script>
 <script>
     renderNav('backtest.html');
 
@@ -282,6 +285,7 @@
 
     function hidePerformanceReport() {
         document.getElementById('performanceReport').classList.add('hidden');
+        document.getElementById('performanceReportTitle').textContent = '대표 코인 성능 리포트';
         document.getElementById('performanceSummaryBody').innerHTML = '';
         document.getElementById('performanceReportBody').innerHTML = '';
     }
@@ -672,6 +676,79 @@
             compareButton.disabled = false;
             thresholdButton.disabled = false;
             button.textContent = '대표 코인 성과 리포트';
+        }
+    }
+
+    let performanceReportJobPollTimer = null;
+
+    function renderPerformanceReportJobStatus(job) {
+        const el = document.getElementById('performanceReportJob');
+        const status = job.status === 'SUCCEEDED' ? 'ready'
+            : job.status === 'FAILED' ? 'blocked' : 'warning';
+        const label = job.status === 'QUEUED' ? '대기 중'
+            : job.status === 'RUNNING' ? '실행 중'
+            : job.status === 'SUCCEEDED' ? '완료'
+            : '실패';
+        const completedRows = (job.successfulRows || 0) + (job.failedRows || 0);
+        const expectedRows = (job.totalSymbols || 0) * 4;
+        el.className = `readiness ${status} mt-16`;
+        el.innerHTML = `<strong>전체 코인 자동 리포트 ${label}</strong>`
+            + `종목 ${job.completedSymbols || 0} / ${job.totalSymbols || 0}개 · `
+            + `모델 실행 ${completedRows} / ${expectedRows}개`
+            + (job.failedRows ? ` · 실패 ${job.failedRows}개` : '')
+            + (job.errorSummary ? `<br>${job.errorSummary}` : '');
+    }
+
+    async function pollPerformanceReportJob(jobId) {
+        clearTimeout(performanceReportJobPollTimer);
+        try {
+            const job = await API.performanceReportJob(jobId);
+            if (!job) {
+                toast('전체 코인 리포트 작업을 찾을 수 없습니다.', 'err');
+                return;
+            }
+            renderPerformanceReportJobStatus(job);
+            if (job.status === 'SUCCEEDED') {
+                document.getElementById('performanceReportTitle').textContent = '전체 코인 성능 리포트';
+                renderPerformanceReport(job);
+                toast('전체 코인 성과 리포트 생성 완료', 'ok');
+                return;
+            }
+            if (job.status === 'FAILED') {
+                toast('전체 코인 성과 리포트 생성에 실패했습니다.', 'err');
+                return;
+            }
+            performanceReportJobPollTimer = setTimeout(() => pollPerformanceReportJob(jobId), 2000);
+        } catch (e) {
+            toast('전체 코인 리포트 상태를 확인하지 못했습니다: ' + friendlyBacktestError(e), 'err');
+        }
+    }
+
+    async function runAllCryptoPerformanceReport() {
+        const from = document.getElementById('from').value;
+        const to = document.getElementById('to').value;
+        const initialCash = Number(document.getElementById('initialCash').value);
+        const minimumHistoryDays = Math.max(50, currentMinimumHistoryDays());
+        if (!from || !to) { toast('시작일과 종료일을 입력하세요', 'err'); return; }
+        if (from > to) { toast('시작일은 종료일보다 빠르거나 같아야 합니다', 'err'); return; }
+        if (!Number.isFinite(initialCash) || initialCash <= 0) {
+            toast('초기 자본은 0보다 큰 값으로 입력하세요', 'err');
+            return;
+        }
+
+        const button = document.getElementById('allCryptoReportBtn');
+        try {
+            button.disabled = true;
+            button.textContent = '작업 시작 중...';
+            const job = await API.startAllCryptoPerformanceReport({ from, to, initialCash, minimumHistoryDays });
+            renderPerformanceReportJobStatus(job);
+            toast(`전체 코인 리포트를 시작했습니다. ${job.totalSymbols}종목을 백그라운드에서 처리합니다.`);
+            pollPerformanceReportJob(job.id);
+        } catch (e) {
+            toast('전체 코인 리포트 시작 실패: ' + friendlyBacktestError(e), 'err');
+        } finally {
+            button.disabled = false;
+            button.textContent = '전체 코인 자동 리포트';
         }
     }
 

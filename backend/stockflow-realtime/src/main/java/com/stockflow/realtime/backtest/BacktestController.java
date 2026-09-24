@@ -7,6 +7,8 @@ import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
 import com.stockflow.realtime.backtest.dto.PerformanceReportResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportUniverseResponse;
+import com.stockflow.realtime.backtest.dto.PerformanceReportJobRequest;
+import com.stockflow.realtime.backtest.dto.PerformanceReportJobResponse;
 import com.stockflow.realtime.backtest.dto.RunRequest;
 import com.stockflow.realtime.backtest.dto.StrategyRequest;
 import com.stockflow.realtime.backtest.dto.StrategyResponse;
@@ -33,6 +35,7 @@ public class BacktestController {
 
     private final BacktestStrategyService strategyService;
     private final BacktestRunService runService;
+    private final PerformanceReportJobService performanceReportJobService;
 
     // ----- 전략 CRUD -----
 
@@ -129,6 +132,23 @@ public class BacktestController {
             @RequestParam(defaultValue = "50") int minimumHistoryDays) {
         return ResponseEntity.ok(
                 runService.inspectPerformanceReportUniverse(from, to, minimumHistoryDays));
+    }
+
+    @PostMapping("/performance-report/jobs")
+    @Operation(summary = "전체 암호화폐 성과 리포트 작업 시작",
+            description = "실행 가능한 모든 Binance 암호화폐를 백그라운드에서 순차 실행하고 진행 상태를 저장합니다.")
+    public ResponseEntity<PerformanceReportJobResponse> startPerformanceReportJob(
+            @Valid @RequestBody PerformanceReportJobRequest request) {
+        return ResponseEntity.accepted().body(performanceReportJobService.start(request));
+    }
+
+    @GetMapping("/performance-report/jobs/{jobId}")
+    @Operation(summary = "전체 암호화폐 성과 리포트 작업 조회",
+            description = "진행률, 완료된 종목별 결과, 완료 시 모델별 요약을 조회합니다.")
+    public ResponseEntity<PerformanceReportJobResponse> getPerformanceReportJob(@PathVariable long jobId) {
+        return performanceReportJobService.get(jobId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/performance-report/thresholds")

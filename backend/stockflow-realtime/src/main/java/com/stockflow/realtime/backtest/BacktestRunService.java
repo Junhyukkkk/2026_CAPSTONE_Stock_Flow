@@ -306,6 +306,25 @@ public class BacktestRunService {
                 .toList();
     }
 
+    @Transactional
+    public PerformanceReportRow runPerformanceReportRow(
+            String symbol, StrategyType type, String model, Map<String, Object> params,
+            BigDecimal initialCash, LocalDate from, LocalDate to) {
+        return runReportRow(symbol, type, model, params, initialCash, from, to);
+    }
+
+    public List<PerformanceReportSummary> summarizePerformanceReportRows(List<PerformanceReportRow> rows) {
+        return summarizeReportRows(rows);
+    }
+
+    public Map<String, Object> defaultReportPredictionParams(String model) {
+        return reportPredictionParams(model);
+    }
+
+    public List<String> reportModels() {
+        return REPORT_MODELS;
+    }
+
     private PerformanceReportRow runReportRow(
             String symbol, StrategyType type, String model, Map<String, Object> params,
             BigDecimal initialCash, LocalDate from, LocalDate to) {
