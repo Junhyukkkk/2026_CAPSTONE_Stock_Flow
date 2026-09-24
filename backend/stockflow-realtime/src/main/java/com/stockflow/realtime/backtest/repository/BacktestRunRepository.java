@@ -97,6 +97,43 @@ public class BacktestRunRepository {
     }
 
     /**
+     * 선택 구간이 연속된 일봉으로 채워져 있고 시작일 전 학습 일수가 충분한 암호화폐 심볼만 반환한다.
+     * 전체 성과 리포트는 이 목록만 대상으로 삼아 실행 실패와 불필요한 모델 호출을 줄인다.
+     */
+    public List<String> findEligibleCryptoSymbols(
+            String source, LocalDate from, LocalDate to, int minimumHistoryDays) {
+        int expectedBars = Math.toIntExact(java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1);
+        return jdbcTemplate.queryForList(
+                """
+                SELECT symbol
+                FROM symbol_daily_ohlcv
+                WHERE source = ?
+                  AND market_type = 'CRYPTO'
+                GROUP BY symbol
+                HAVING COUNT(DISTINCT trade_date)
+                           FILTER (WHERE trade_date BETWEEN ? AND ?) = ?
+                   AND COUNT(DISTINCT trade_date)
+                           FILTER (WHERE trade_date < ?) >= ?
+                ORDER BY symbol
+                """,
+                String.class,
+                source, Date.valueOf(from), Date.valueOf(to), expectedBars,
+                Date.valueOf(from), minimumHistoryDays);
+    }
+
+    public int countKnownCryptoSymbols(String source) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(DISTINCT symbol)
+                FROM symbol_daily_ohlcv
+                WHERE source = ?
+                  AND market_type = 'CRYPTO'
+                """,
+                Integer.class, source);
+        return count == null ? 0 : count;
+    }
+
+    /**
      * 실행 결과 헤더와 체결/자산곡선을 한 트랜잭션으로 저장하고 run id 를 반환한다.
      */
     public long saveResult(Long strategyId, String symbol, String strategyType,

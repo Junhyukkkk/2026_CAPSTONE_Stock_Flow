@@ -57,6 +57,7 @@
                 <div class="field"><label>종료일</label><input type="date" id="to"></div>
             </div>
             <div id="dataReadiness" class="readiness hidden" aria-live="polite"></div>
+            <div id="reportUniverse" class="hint" aria-live="polite"></div>
             <div class="flex">
                 <button class="btn" id="runBtn" onclick="runBacktest()">선택 모델 실행</button>
                 <button class="btn-ghost" id="compareBtn" onclick="runComparison()">예측 모델 비교</button>
@@ -177,7 +178,7 @@
     </div>
 </div>
 
-<script src=assets/api.js?prediction-backtest-20260924></script>
+<script src=assets/api.js?report-universe-20260924></script>
 <script>
     renderNav('backtest.html');
 
@@ -217,7 +218,7 @@
                         <div class="field">
                             <label>최소 학습 일수</label>
                             <input type="number" data-param="warmup" value="50" min="50" max="500"
-                                   oninput="validateWarmupInput(this); scheduleDataReadinessCheck()">
+                                   oninput="validateWarmupInput(this); scheduleDataReadinessCheck(); schedulePerformanceReportUniverseCheck()">
                             <div class="hint" id="warmupHelp">최소 50개의 실제 일봉 데이터가 필요합니다.</div>
                         </div>
                         <div class="field"><label>모델 갱신 주기(일)</label><input type="number" data-param="refitEvery" value="5" min="1" max="30"></div>
@@ -304,6 +305,34 @@
         readinessTimer = setTimeout(() => checkDataReadiness(), 250);
     }
 
+    let reportUniverseTimer = null;
+    let reportUniverseRequestId = 0;
+    function schedulePerformanceReportUniverseCheck() {
+        clearTimeout(reportUniverseTimer);
+        reportUniverseTimer = setTimeout(() => checkPerformanceReportUniverse(), 300);
+    }
+
+    async function checkPerformanceReportUniverse() {
+        const from = document.getElementById('from').value;
+        const to = document.getElementById('to').value;
+        const el = document.getElementById('reportUniverse');
+        if (!from || !to || from > to) {
+            el.textContent = '';
+            return;
+        }
+        const warmup = Math.max(50, currentMinimumHistoryDays());
+        const requestId = ++reportUniverseRequestId;
+        try {
+            const universe = await API.performanceReportUniverse(from, to, warmup);
+            if (requestId !== reportUniverseRequestId) return;
+            el.textContent = `전체 자동 리포트 대상: ${universe.eligibleSymbolCount} / ${universe.knownCryptoSymbolCount}종목 (연속 일봉 + ${warmup}일 학습 조건)`;
+        } catch (_) {
+            if (requestId === reportUniverseRequestId) {
+                el.textContent = '전체 자동 리포트 대상 수를 확인하지 못했습니다.';
+            }
+        }
+    }
+
     function renderDataReadiness(readiness) {
         const el = document.getElementById('dataReadiness');
         const statusClass = readiness.status === 'READY'
@@ -382,8 +411,12 @@
         return message;
     }
     renderParams();
+    schedulePerformanceReportUniverseCheck();
     ['symbol', 'from', 'to'].forEach(id => {
-        document.getElementById(id).addEventListener(id === 'symbol' ? 'change' : 'change', scheduleDataReadinessCheck);
+        document.getElementById(id).addEventListener('change', () => {
+            scheduleDataReadinessCheck();
+            if (id !== 'symbol') schedulePerformanceReportUniverseCheck();
+        });
     });
 
     function buildRunBody() {

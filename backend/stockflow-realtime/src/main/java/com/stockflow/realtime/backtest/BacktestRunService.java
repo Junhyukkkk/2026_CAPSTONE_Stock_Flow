@@ -6,6 +6,7 @@ import com.stockflow.realtime.backtest.dto.EquityPointResponse;
 import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
 import com.stockflow.realtime.backtest.dto.PerformanceReportResponse;
+import com.stockflow.realtime.backtest.dto.PerformanceReportUniverseResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportResponse.PerformanceReportRow;
 import com.stockflow.realtime.backtest.dto.PerformanceReportResponse.PerformanceReportSummary;
 import com.stockflow.realtime.backtest.dto.ThresholdReportRequest;
@@ -139,6 +140,24 @@ public class BacktestRunService {
                 coverage.firstDate(), coverage.lastDate(),
                 selectedBars.size(), expectedBarCount, missingBarCount,
                 historyBarCount, minimumHistoryDays, canRun, status, message);
+    }
+
+    /**
+     * 전체 성과 리포트 실행 전에 동일한 데이터 연속성·학습 조건을 충족하는 코인만 선별한다.
+     * 실제 모델 실행은 별도 리포트 작업에서 수행한다.
+     */
+    public PerformanceReportUniverseResponse inspectPerformanceReportUniverse(
+            LocalDate from, LocalDate to, int minimumHistoryDays) {
+        validateRange(from, to);
+        if (minimumHistoryDays < 50 || minimumHistoryDays > 500) {
+            throw new IllegalArgumentException("minimumHistoryDays must be between 50 and 500");
+        }
+        List<String> eligibleSymbols = runRepository.findEligibleCryptoSymbols(
+                DEFAULT_SOURCE, from, to, minimumHistoryDays);
+        return new PerformanceReportUniverseResponse(
+                from, to, minimumHistoryDays,
+                runRepository.countKnownCryptoSymbols(DEFAULT_SOURCE),
+                eligibleSymbols.size(), eligibleSymbols);
     }
 
     /** 동일 조건으로 대표 암호화폐와 예측 모델의 성과를 일괄 집계한다. */

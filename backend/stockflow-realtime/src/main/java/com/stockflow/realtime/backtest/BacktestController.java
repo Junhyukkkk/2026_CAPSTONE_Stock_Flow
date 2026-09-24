@@ -6,6 +6,7 @@ import com.stockflow.realtime.backtest.dto.EquityPointResponse;
 import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
 import com.stockflow.realtime.backtest.dto.PerformanceReportResponse;
+import com.stockflow.realtime.backtest.dto.PerformanceReportUniverseResponse;
 import com.stockflow.realtime.backtest.dto.RunRequest;
 import com.stockflow.realtime.backtest.dto.StrategyRequest;
 import com.stockflow.realtime.backtest.dto.StrategyResponse;
@@ -117,6 +118,17 @@ public class BacktestController {
     public ResponseEntity<PerformanceReportResponse> generatePerformanceReport(
             @Valid @RequestBody PerformanceReportRequest request) {
         return ResponseEntity.ok(runService.generatePerformanceReport(request));
+    }
+
+    @GetMapping("/performance-report/universe")
+    @Operation(summary = "전체 코인 성과 리포트 대상 조회",
+            description = "선택 기간의 연속 일봉과 시작일 전 학습 데이터 조건을 모두 충족하는 Binance 암호화폐를 반환합니다.")
+    public ResponseEntity<PerformanceReportUniverseResponse> getPerformanceReportUniverse(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "50") int minimumHistoryDays) {
+        return ResponseEntity.ok(
+                runService.inspectPerformanceReportUniverse(from, to, minimumHistoryDays));
     }
 
     @PostMapping("/performance-report/thresholds")

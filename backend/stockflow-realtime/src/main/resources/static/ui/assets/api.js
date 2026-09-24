@@ -61,6 +61,9 @@ const API = {
             + `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
             + `&source=${encodeURIComponent(source)}&minimumHistoryDays=${minimumHistoryDays}`),
     performanceReport: (body) => API.post('/api/backtest/performance-report', body),
+    performanceReportUniverse: (from, to, minimumHistoryDays = 50) =>
+        API.get(`/api/backtest/performance-report/universe?from=${encodeURIComponent(from)}`
+            + `&to=${encodeURIComponent(to)}&minimumHistoryDays=${minimumHistoryDays}`),
     thresholdReport: (body) => API.post('/api/backtest/performance-report/thresholds', body),
     runSaved: (id, from, to) =>
         API.post(`/api/backtest/strategies/${id}/run?from=${from}&to=${to}`, {}),
