@@ -1,6 +1,7 @@
 package com.stockflow.realtime.controller;
 
 import com.stockflow.realtime.batch.service.PrevCloseSyncService;
+import com.stockflow.realtime.batch.service.BinanceDailyOhlcvBackfillService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -31,6 +33,7 @@ import java.util.Map;
 public class BatchTriggerController {
 
     private final PrevCloseSyncService prevCloseSyncService;
+    private final BinanceDailyOhlcvBackfillService binanceDailyOhlcvBackfillService;
     private final JobLauncher jobLauncher;
 
     @Qualifier("dailyOhlcvJob")
@@ -88,6 +91,21 @@ public class BatchTriggerController {
         results.put("dataValidationJob", runJob(dataValidationJob, targetDate));
 
         return ResponseEntity.ok(results);
+    }
+
+    /**
+     * Binance 공식 REST 일봉으로 과거 누락 구간을 보완한다.
+     * symbols를 생략하면 DB에서 발견한 모든 Binance 암호화폐 심볼을 처리한다.
+     */
+    @PostMapping("/daily/backfill/binance")
+    public ResponseEntity<BinanceDailyOhlcvBackfillService.BackfillResult> backfillBinanceDaily(
+            @RequestParam String from,
+            @RequestParam String to,
+            @RequestParam(required = false) List<String> symbols) {
+        LocalDate fromDate = LocalDate.parse(from);
+        LocalDate toDate = LocalDate.parse(to);
+        return ResponseEntity.ok(
+                binanceDailyOhlcvBackfillService.backfill(fromDate, toDate, symbols));
     }
 
     private String runJob(Job job, String targetDate) {
