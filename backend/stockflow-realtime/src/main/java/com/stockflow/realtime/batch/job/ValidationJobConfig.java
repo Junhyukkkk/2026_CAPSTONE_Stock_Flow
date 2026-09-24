@@ -20,7 +20,9 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import java.sql.Date;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -43,6 +45,10 @@ import java.util.Map;
  *   당일 OHLCV는 있으나 지표(symbol_daily_indicators)가 적재되지 않은 심볼을 탐지.
  *   지표 계산 Job이 일부 심볼을 누락했는지 조기 감지.
  *
+ * Step 5 — 백테스트 입력 준비 상태 검증:
+ *   암호화폐 일봉의 최소 학습 데이터(50일), 최신성, 중간 날짜 누락을 점검.
+ *   데이터가 부족한 종목으로 백테스트를 실행하기 전에 운영자가 원인을 확인할 수 있게 한다.
+ *
  * 각 Step의 결과는 batch_job_runs.meta(JSONB)에 저장된다.
  */
 @Slf4j
@@ -64,6 +70,7 @@ public class ValidationJobConfig {
                 .next(ohlcvSanityStep())
                 .next(extremeMovementStep())
                 .next(indicatorCoverageStep())
+                .next(backtestReadinessStep())
                 .build();
     }
 
@@ -266,6 +273,95 @@ public class ValidationJobConfig {
                     "missingCount",   missingIndicators.size(),
                     "missingSymbols", missingIndicators
             ));
+
+            return RepeatStatus.FINISHED;
+        };
+    }
+
+    // ── Step 5: 백테스트 입력 준비 상태 검증 ─────────────────────────────────
+
+    @Bean
+    public Step backtestReadinessStep() {
+        return new StepBuilder("backtestReadinessStep", jobRepository)
+                .tasklet(backtestReadinessTasklet(null), transactionManager)
+                .build();
+    }
+
+    @Bean
+    @StepScope
+    public Tasklet backtestReadinessTasklet(
+            @Value("#{jobParameters['targetDate']}") String targetDate) {
+
+        return (contribution, chunkContext) -> {
+            LocalDate target = LocalDate.parse(targetDate);
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    """
+                    SELECT
+                        symbol,
+                        source,
+                        COUNT(DISTINCT trade_date) AS observation_count,
+                        MIN(trade_date) AS first_date,
+                        MAX(trade_date) AS last_date,
+                        GREATEST(?::date - MAX(trade_date), 0) AS stale_days,
+                        GREATEST(
+                            MAX(trade_date) - MIN(trade_date) + 1 - COUNT(DISTINCT trade_date),
+                            0
+                        ) AS internal_gap_days
+                    FROM symbol_daily_ohlcv
+                    WHERE market_type = 'CRYPTO'
+                      AND trade_date <= ?::date
+                    GROUP BY symbol, source
+                    ORDER BY symbol, source
+                    """,
+                    Date.valueOf(target), Date.valueOf(target)
+            );
+
+            final int minimumHistoryDays = 50;
+            int readyCount = 0;
+            List<Map<String, Object>> attention = new ArrayList<>();
+
+            for (Map<String, Object> row : rows) {
+                int observations = ((Number) row.get("observation_count")).intValue();
+                int staleDays = ((Number) row.get("stale_days")).intValue();
+                int internalGapDays = ((Number) row.get("internal_gap_days")).intValue();
+                boolean ready = observations >= minimumHistoryDays
+                        && staleDays == 0
+                        && internalGapDays == 0;
+
+                if (ready) {
+                    readyCount++;
+                    continue;
+                }
+
+                Map<String, Object> issue = new LinkedHashMap<>();
+                issue.put("symbol", row.get("symbol"));
+                issue.put("source", row.get("source"));
+                issue.put("observationCount", observations);
+                issue.put("firstDate", row.get("first_date").toString());
+                issue.put("lastDate", row.get("last_date").toString());
+                issue.put("staleDays", staleDays);
+                issue.put("internalGapDays", internalGapDays);
+                issue.put("minimumHistoryDays", minimumHistoryDays);
+                attention.add(issue);
+            }
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("targetDate", targetDate);
+            result.put("marketType", "CRYPTO");
+            result.put("minimumHistoryDays", minimumHistoryDays);
+            result.put("symbolSourceCount", rows.size());
+            result.put("readyCount", readyCount);
+            result.put("attentionCount", attention.size());
+            result.put("attention", attention);
+            saveValidationResult("backtest_readiness", targetDate, result);
+
+            if (attention.isEmpty()) {
+                log.info("Backtest readiness PASS: {} crypto symbol-source pairs ready on {}",
+                        readyCount, target);
+            } else {
+                log.warn("Backtest readiness WARN: {}/{} crypto symbol-source pairs need attention on {}: {}",
+                        attention.size(), rows.size(), target, attention);
+            }
 
             return RepeatStatus.FINISHED;
         };
