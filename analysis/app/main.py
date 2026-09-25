@@ -13,6 +13,8 @@ from . import service
 from .config import settings
 from .schemas import (
     ComparePredictResponse,
+    IntradayPredictionSignalRequest,
+    IntradayPredictionSignalResponse,
     ModelInfo,
     PredictionSignalRequest,
     PredictionSignalResponse,
@@ -115,5 +117,22 @@ def create_prediction_signals(request: PredictionSignalRequest):
         raise HTTPException(
             status_code=404,
             detail=f"'{request.symbol}' 일봉 데이터를 찾을 수 없습니다.",
+        )
+    return result
+
+
+@app.post(
+    "/backtest/intraday-prediction-signals",
+    response_model=IntradayPredictionSignalResponse,
+)
+def create_intraday_prediction_signals(request: IntradayPredictionSignalRequest):
+    try:
+        result = service.intraday_prediction_signals(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"'{request.symbol}' 1분봉 데이터를 찾을 수 없습니다.",
         )
     return result

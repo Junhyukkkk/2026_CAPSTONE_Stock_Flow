@@ -32,6 +32,18 @@ _DAILY_SQL = text(
     """
 )
 
+_MINUTE_RANGE_SQL = text(
+    """
+    SELECT bucket AS ts, open, high, low, close, volume
+    FROM market_ticks_1m
+    WHERE symbol = :symbol
+      AND (:source IS NULL OR source = :source)
+      AND bucket >= :from_time
+      AND bucket < :to_time
+    ORDER BY bucket ASC
+    """
+)
+
 
 @lru_cache(maxsize=1)
 def get_engine():
@@ -53,3 +65,27 @@ def load_ohlcv(symbol: str, interval: str = "1m", source=None, limit: int = 2000
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
     return df
+
+
+def load_intraday_ohlcv_range(symbol: str, source, from_time, to_time) -> pd.DataFrame:
+    """지정한 실제 시각 범위의 1분봉을 오래된 순으로 반환한다.
+
+    워크포워드 백테스트는 최근 N개 봉이 아니라 사용자가 지정한 구간과 그 직전 학습 구간을
+    정확히 읽어야 하므로, 일반 ``load_ohlcv`` 와 분리한다.
+    """
+    params = {
+        "symbol": symbol,
+        "source": source,
+        "from_time": from_time,
+        "to_time": to_time,
+    }
+    with get_engine().connect() as conn:
+        df = pd.read_sql(_MINUTE_RANGE_SQL, conn, params=params)
+
+    if df.empty:
+        return df
+
+    for col in ("open", "high", "low", "close", "volume"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    return df.sort_values("ts").reset_index(drop=True)

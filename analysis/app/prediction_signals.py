@@ -86,6 +86,23 @@ def validate_crypto_daily_series(series: pd.Series) -> None:
     validate_daily_series(series, require_consecutive_days=True)
 
 
+def validate_intraday_series(series: pd.Series) -> None:
+    """실제 1분봉만 사용하는 워크포워드 백테스트용 검증."""
+    if series.empty:
+        raise ValueError("intraday close series is empty")
+    if series.index.has_duplicates:
+        raise ValueError("intraday close series contains duplicate timestamps")
+    if series.isna().any() or not np.isfinite(series.to_numpy(dtype=float)).all():
+        raise ValueError("intraday close series contains invalid values")
+    if (series <= 0).any():
+        raise ValueError("intraday close prices must be positive")
+
+    timestamps = pd.DatetimeIndex(series.index)
+    gaps = timestamps.to_series().diff().dropna()
+    if not gaps.empty and not (gaps == pd.Timedelta(minutes=1)).all():
+        raise ValueError("intraday crypto series contains missing minutes")
+
+
 def generate_walk_forward_signals(
     series: pd.Series,
     *,
@@ -172,6 +189,92 @@ def generate_walk_forward_signals(
                 }
             )
 
+        execution_index += block_size
+
+    return signals
+
+
+def generate_intraday_walk_forward_signals(
+    series: pd.Series,
+    *,
+    model: str,
+    from_time,
+    to_time,
+    warmup: int = 50,
+    refit_every: int = 5,
+    max_history: int = 200,
+    volatility_window: int = 20,
+    volatility_multiplier: float = 0.5,
+    fee_bps: float = 10,
+    slippage_bps: float = 5,
+    forecaster: Forecaster = forecast_prices,
+) -> list[dict]:
+    """1분봉 종가 이력만 사용해 다음 1분봉 시가 체결용 신호를 생성한다."""
+    if model not in SUPPORTED_MODELS:
+        raise ValueError(f"unsupported prediction model: {model}")
+    if warmup < 50 or refit_every < 1 or max_history < warmup:
+        raise ValueError("invalid warmup, refit_every, or max_history")
+
+    start = pd.Timestamp(from_time)
+    end = pd.Timestamp(to_time)
+    if start.tzinfo is None or end.tzinfo is None:
+        raise ValueError("from_time and to_time must include a timezone")
+    if start >= end:
+        raise ValueError("from_time must be earlier than to_time")
+    series = series.astype(float).sort_index()
+    validate_intraday_series(series)
+    timestamps = list(pd.DatetimeIndex(series.index))
+    target_indices = [
+        index for index, timestamp in enumerate(timestamps)
+        if start <= timestamp < end
+    ]
+    if not target_indices:
+        raise ValueError("no minute bars in requested range")
+
+    first_index = target_indices[0]
+    last_index = target_indices[-1]
+    if first_index < warmup:
+        raise ValueError(
+            f"at least {warmup} observations are required before from_time "
+            f"(found {first_index} actual minute observations)"
+        )
+
+    round_trip_cost_pct = 2.0 * (fee_bps + slippage_bps) / 100.0
+    signals: list[dict] = []
+    execution_index = first_index
+    while execution_index <= last_index:
+        block_size = min(refit_every, last_index - execution_index + 1)
+        history_start = max(0, execution_index - max_history)
+        history = series.iloc[history_start:execution_index]
+        if len(history) < warmup:
+            raise ValueError("insufficient history for walk-forward forecast")
+        predictions = np.asarray(forecaster(history, model, block_size), dtype=float)
+        if predictions.size != block_size or not np.isfinite(predictions).all():
+            raise ValueError("forecast returned invalid prediction values")
+
+        reference_price = float(history.iloc[-1])
+        minute_volatility_pct = volatility_pct(history, volatility_window)
+        signal_time = timestamps[execution_index - 1]
+        for offset in range(block_size):
+            predicted_price = float(predictions[offset])
+            if predicted_price <= 0:
+                raise ValueError("forecast returned a non-positive price")
+            step = offset + 1
+            expected_return_pct = (predicted_price / reference_price - 1.0) * 100.0
+            threshold_pct = round_trip_cost_pct + (
+                volatility_multiplier * minute_volatility_pct * sqrt(step)
+            )
+            signals.append(
+                {
+                    "signal_time": signal_time,
+                    "execution_time": timestamps[execution_index + offset],
+                    "reference_price": reference_price,
+                    "predicted_price": predicted_price,
+                    "expected_return_pct": expected_return_pct,
+                    "threshold_pct": threshold_pct,
+                    "signal": classify_signal(expected_return_pct, threshold_pct),
+                }
+            )
         execution_index += block_size
 
     return signals

@@ -10,7 +10,10 @@ from .model.arima import fit_arima, forecast as arima_forecast
 from .model.chronos_bolt import forecast as chronos_forecast
 from .model.log_return_arima import backtest_holdout as log_return_backtest_holdout
 from .model.log_return_arima import forecast as log_return_forecast
-from .prediction_signals import generate_walk_forward_signals
+from .prediction_signals import (
+    generate_intraday_walk_forward_signals,
+    generate_walk_forward_signals,
+)
 
 MIN_OBS = 50  # ARIMA 학습 최소 관측치
 
@@ -260,6 +263,61 @@ def prediction_signals(request):
         "model": request.model,
         "from_date": request.from_date,
         "to_date": request.to_date,
+        "warmup": request.warmup,
+        "refit_every": request.refit_every,
+        "fee_bps": request.fee_bps,
+        "slippage_bps": request.slippage_bps,
+        "signal_count": len(signals),
+        "buy_count": counts["BUY"],
+        "hold_count": counts["HOLD"],
+        "sell_count": counts["SELL"],
+        "mae": float(errors.abs().mean()),
+        "rmse": float((errors.pow(2).mean()) ** 0.5),
+        "mae_pct": float(percentage_errors.abs().mean()),
+        "rmse_pct": float((percentage_errors.pow(2).mean()) ** 0.5),
+        "signals": signals,
+    }
+
+
+def intraday_prediction_signals(request):
+    """실제 연속 1분봉 구간에 대한 누수 없는 워크포워드 신호를 생성한다."""
+    history_from = request.from_time - pd.Timedelta(minutes=request.max_history)
+    df = db.load_intraday_ohlcv_range(
+        request.symbol, request.source, history_from, request.to_time
+    )
+    if df.empty:
+        return None
+
+    series = preprocess.to_close_series(df)
+    signals = generate_intraday_walk_forward_signals(
+        series,
+        model=request.model,
+        from_time=request.from_time,
+        to_time=request.to_time,
+        warmup=request.warmup,
+        refit_every=request.refit_every,
+        max_history=request.max_history,
+        volatility_window=request.volatility_window,
+        volatility_multiplier=request.volatility_multiplier,
+        fee_bps=request.fee_bps,
+        slippage_bps=request.slippage_bps,
+    )
+    counts = {name: sum(point["signal"] == name for point in signals)
+              for name in ("BUY", "HOLD", "SELL")}
+    actual_by_time = {timestamp: float(value) for timestamp, value in series.items()}
+    actual = pd.Series(
+        [actual_by_time[point["execution_time"]] for point in signals], dtype=float
+    )
+    predicted = pd.Series(
+        [point["predicted_price"] for point in signals], dtype=float
+    )
+    errors = predicted - actual
+    percentage_errors = errors / actual * 100.0
+    return {
+        "symbol": request.symbol,
+        "model": request.model,
+        "from_time": request.from_time,
+        "to_time": request.to_time,
         "warmup": request.warmup,
         "refit_every": request.refit_every,
         "fee_bps": request.fee_bps,

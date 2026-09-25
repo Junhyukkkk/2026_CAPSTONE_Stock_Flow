@@ -1,5 +1,5 @@
 """API 요청/응답 스키마 (pydantic)."""
-from datetime import date
+from datetime import date, datetime
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -111,3 +111,48 @@ class PredictionSignalResponse(BaseModel):
     mae_pct: float
     rmse_pct: float
     signals: List[PredictionSignalPoint]
+
+
+class IntradayPredictionSignalRequest(BaseModel):
+    symbol: str
+    model: Literal["ARIMA", "LOG_RETURN_ARIMA", "CHRONOS_BOLT"]
+    from_time: datetime
+    to_time: datetime
+    source: Optional[str] = "BINANCE"
+    warmup: int = Field(default=50, ge=50, le=500)
+    refit_every: int = Field(default=5, ge=1, le=15)
+    max_history: int = Field(default=200, ge=50, le=500)
+    volatility_window: int = Field(default=20, ge=5, le=100)
+    volatility_multiplier: float = Field(default=0.5, ge=0, le=5)
+    fee_bps: float = Field(default=10, ge=0, le=1000)
+    slippage_bps: float = Field(default=5, ge=0, le=1000)
+
+
+class IntradayPredictionSignalPoint(BaseModel):
+    signal_time: datetime
+    execution_time: datetime
+    reference_price: float
+    predicted_price: float
+    expected_return_pct: float
+    threshold_pct: float
+    signal: Literal["BUY", "HOLD", "SELL"]
+
+
+class IntradayPredictionSignalResponse(BaseModel):
+    symbol: str
+    model: str
+    from_time: datetime
+    to_time: datetime
+    warmup: int
+    refit_every: int
+    fee_bps: float
+    slippage_bps: float
+    signal_count: int
+    buy_count: int
+    hold_count: int
+    sell_count: int
+    mae: float
+    rmse: float
+    mae_pct: float
+    rmse_pct: float
+    signals: List[IntradayPredictionSignalPoint]

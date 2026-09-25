@@ -6,6 +6,7 @@ import pandas as pd
 
 from app.prediction_signals import (
     classify_signal,
+    generate_intraday_walk_forward_signals,
     generate_walk_forward_signals,
     validate_daily_series,
     validate_crypto_daily_series,
@@ -96,6 +97,50 @@ class PredictionSignalsTest(unittest.TestCase):
                 to_date=date(2026, 3, 5),
                 warmup=49,
                 forecaster=lambda history, model, steps: np.ones(steps),
+            )
+
+    def test_intraday_walk_forward_uses_prior_minute_only(self):
+        index = pd.date_range("2026-09-25T08:00:00Z", periods=70, freq="1min")
+        series = pd.Series(np.linspace(100.0, 120.0, 70), index=index)
+        calls = []
+
+        def rising_forecaster(history, model, steps):
+            calls.append((history.index[-1], len(history), steps))
+            last = float(history.iloc[-1])
+            return np.array([last * (1.01 ** step) for step in range(1, steps + 1)])
+
+        signals = generate_intraday_walk_forward_signals(
+            series,
+            model="ARIMA",
+            from_time=index[50],
+            to_time=index[60],
+            warmup=50,
+            refit_every=5,
+            max_history=50,
+            volatility_multiplier=0,
+            fee_bps=0,
+            slippage_bps=0,
+            forecaster=rising_forecaster,
+        )
+
+        self.assertEqual(10, len(signals))
+        self.assertEqual(index[49], signals[0]["signal_time"])
+        self.assertEqual(index[50], signals[0]["execution_time"])
+        self.assertTrue(all(point["signal"] == "BUY" for point in signals))
+        self.assertEqual(index[49], calls[0][0])
+        self.assertEqual(2, len(calls))
+
+    def test_intraday_walk_forward_rejects_missing_minute(self):
+        index = pd.date_range("2026-09-25T08:00:00Z", periods=70, freq="1min")
+        series = pd.Series(np.linspace(100.0, 120.0, 70), index=index).drop(index[12])
+
+        with self.assertRaisesRegex(ValueError, "missing minutes"):
+            generate_intraday_walk_forward_signals(
+                series,
+                model="ARIMA",
+                from_time=index[50],
+                to_time=index[60],
+                warmup=50,
             )
 
 
