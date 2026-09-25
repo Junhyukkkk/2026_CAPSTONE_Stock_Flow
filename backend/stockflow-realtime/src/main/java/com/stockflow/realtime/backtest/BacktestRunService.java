@@ -3,6 +3,8 @@ package com.stockflow.realtime.backtest;
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
 import com.stockflow.realtime.backtest.dto.BacktestDataReadinessResponse;
 import com.stockflow.realtime.backtest.dto.IntradayBacktestDataReadinessResponse;
+import com.stockflow.realtime.backtest.dto.IntradayBacktestResponse;
+import com.stockflow.realtime.backtest.dto.IntradayRunRequest;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
 import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
@@ -21,6 +23,9 @@ import com.stockflow.realtime.backtest.engine.BacktestResult;
 import com.stockflow.realtime.backtest.engine.Signal;
 import com.stockflow.realtime.backtest.engine.strategy.StrategyFactory;
 import com.stockflow.realtime.backtest.engine.strategy.TradingStrategy;
+import com.stockflow.realtime.backtest.intraday.IntradayBacktestEngine;
+import com.stockflow.realtime.backtest.intraday.IntradayBacktestResult;
+import com.stockflow.realtime.backtest.intraday.IntradayBar;
 import com.stockflow.realtime.backtest.model.StrategyType;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository;
 import com.stockflow.realtime.backtest.repository.BacktestRunRepository.EquityRow;
@@ -75,6 +80,7 @@ public class BacktestRunService {
     private final BacktestEngine engine;
     private final PredictionService predictionService;
     private final IntradayOhlcvService intradayOhlcvService;
+    private final IntradayBacktestEngine intradayBacktestEngine;
 
     /** 저장된 전략으로 백테스트 실행. */
     @Transactional
@@ -203,6 +209,161 @@ public class BacktestRunService {
                         : selectedBars.get(selectedBars.size() - 1).getTime(),
                 selected, expected, missing,
                 history, minimumHistoryBars, canUse, status, message);
+    }
+
+    /**
+     * BTCUSDT 1분봉의 기준 전략을 즉석 실행한다. 일봉 실행·저장 테이블과 분리해 결과를 반환한다.
+     */
+    public IntradayBacktestResponse runIntraday(IntradayRunRequest request) {
+        String symbol = normalizeIntradaySymbol(request.getSymbol());
+        StrategyType strategyType = StrategyType.from(request.getStrategyType());
+        if (strategyType != StrategyType.BUY_AND_HOLD && strategyType != StrategyType.MA_CROSSOVER) {
+            throw new IllegalArgumentException("intraday backtest currently supports BUY_AND_HOLD and MA_CROSSOVER");
+        }
+        Instant start = truncateToMinute(request.getFrom());
+        Instant end = truncateToMinute(request.getTo());
+        validateIntradayRange(start, end);
+
+        BigDecimal initialCash = request.getInitialCash() == null ? DEFAULT_INITIAL_CASH : request.getInitialCash();
+        if (initialCash.signum() <= 0) {
+            throw new IllegalArgumentException("initialCash must be positive");
+        }
+        BigDecimal feeBps = request.getFeeBps() == null ? BigDecimal.TEN : request.getFeeBps();
+        BigDecimal slippageBps = request.getSlippageBps() == null ? BigDecimal.valueOf(5) : request.getSlippageBps();
+        validateBasisPoints(feeBps, "feeBps");
+        validateBasisPoints(slippageBps, "slippageBps");
+
+        List<IntradayBar> selectedBars = toIntradayBars(
+                intradayOhlcvService.getIntraday(symbol, "1m", start, end));
+        int expectedBars = Math.toIntExact(Duration.between(start, end).toMinutes());
+        if (selectedBars.size() != expectedBars) {
+            throw new NoDataException("선택한 구간의 1분봉이 연속적이지 않습니다. 누락 구간을 채운 뒤 다시 실행해주세요.");
+        }
+
+        Map<String, Object> params = request.getParams() == null ? Map.of() : new LinkedHashMap<>(request.getParams());
+        List<Signal> selectedSignals;
+        Signal initialSignal;
+        if (strategyType == StrategyType.BUY_AND_HOLD) {
+            selectedSignals = holdSignals(selectedBars.size());
+            initialSignal = Signal.BUY;
+        } else {
+            int shortPeriod = positiveIntParam(params, "shortPeriod", 5);
+            int longPeriod = positiveIntParam(params, "longPeriod", 20);
+            if (shortPeriod >= longPeriod || longPeriod > 240) {
+                throw new IllegalArgumentException("MA periods must satisfy 1 <= shortPeriod < longPeriod <= 240");
+            }
+            params.put("shortPeriod", shortPeriod);
+            params.put("longPeriod", longPeriod);
+            int requiredHistory = longPeriod + 1;
+            Instant historyFrom = start.minus(Duration.ofMinutes(requiredHistory));
+            List<IntradayBar> historyBars = toIntradayBars(
+                    intradayOhlcvService.getIntraday(symbol, "1m", historyFrom, start));
+            if (historyBars.size() != requiredHistory) {
+                throw new NoDataException("MA Crossover에는 시작 시각 이전의 연속된 1분봉 "
+                        + requiredHistory + "개가 필요합니다.");
+            }
+            List<IntradayBar> signalBars = new ArrayList<>(historyBars.size() + selectedBars.size());
+            signalBars.addAll(historyBars);
+            signalBars.addAll(selectedBars);
+            List<Signal> allSignals = maCrossoverSignals(signalBars, shortPeriod, longPeriod);
+            initialSignal = allSignals.get(historyBars.size() - 1);
+            selectedSignals = new ArrayList<>(allSignals.subList(historyBars.size(), allSignals.size()));
+        }
+
+        IntradayBacktestResult result = intradayBacktestEngine.run(
+                selectedBars, selectedSignals, initialSignal, initialCash,
+                IntradayBacktestEngine.ExecutionConfig.fromBasisPoints(feeBps, slippageBps));
+        return new IntradayBacktestResponse(
+                symbol, DEFAULT_SOURCE, "1m", strategyType.name(), Map.copyOf(params), start, end,
+                result.initialCash(), feeBps, slippageBps, result.finalEquity(), result.totalReturnPct(),
+                result.mddPct(), result.roundTripCount(), result.winRatePct(), result.barCount(),
+                result.trades().stream().map(IntradayBacktestResponse.Trade::from).toList(),
+                result.equityCurve().stream().map(IntradayBacktestResponse.EquityPoint::from).toList());
+    }
+
+    private String normalizeIntradaySymbol(String symbol) {
+        String normalized = symbol == null ? "" : symbol.trim().toUpperCase(Locale.ROOT);
+        if (!"BTCUSDT".equals(normalized)) {
+            throw new IllegalArgumentException("intraday backtest currently supports BTCUSDT only");
+        }
+        return normalized;
+    }
+
+    private static Instant truncateToMinute(Instant time) {
+        if (time == null) {
+            throw new IllegalArgumentException("from and to times are required");
+        }
+        return time.truncatedTo(ChronoUnit.MINUTES);
+    }
+
+    private static void validateIntradayRange(Instant from, Instant to) {
+        if (!from.isBefore(to)) {
+            throw new IllegalArgumentException("from must be earlier than to");
+        }
+        if (Duration.between(from, to).compareTo(Duration.ofHours(6)) > 0) {
+            throw new IllegalArgumentException("intraday backtest range must be within 6 hours");
+        }
+    }
+
+    private static void validateBasisPoints(BigDecimal value, String name) {
+        if (value.signum() < 0 || value.compareTo(BigDecimal.valueOf(1000)) > 0) {
+            throw new IllegalArgumentException(name + " must be between 0 and 1000");
+        }
+    }
+
+    private static int positiveIntParam(Map<String, Object> params, String key, int defaultValue) {
+        Object raw = params.get(key);
+        if (raw == null) {
+            return defaultValue;
+        }
+        try {
+            int value = raw instanceof Number number ? number.intValue() : Integer.parseInt(raw.toString());
+            if (value < 1) {
+                throw new IllegalArgumentException(key + " must be at least 1");
+            }
+            return value;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(key + " must be an integer");
+        }
+    }
+
+    private static List<IntradayBar> toIntradayBars(
+            List<com.stockflow.realtime.stock.dto.IntradayOhlcvResponse> candles) {
+        return candles.stream()
+                .map(candle -> new IntradayBar(candle.getTime(), candle.getOpen(), candle.getHigh(), candle.getLow(),
+                        candle.getClose(), candle.getVolume()))
+                .toList();
+    }
+
+    private static List<Signal> holdSignals(int size) {
+        return java.util.Collections.nCopies(size, Signal.HOLD);
+    }
+
+    private static List<Signal> maCrossoverSignals(List<IntradayBar> bars, int shortPeriod, int longPeriod) {
+        List<Signal> signals = new ArrayList<>(bars.size());
+        double[] closes = new double[bars.size()];
+        for (int i = 0; i < bars.size(); i++) {
+            closes[i] = bars.get(i).close().doubleValue();
+            if (i < longPeriod) {
+                signals.add(Signal.HOLD);
+                continue;
+            }
+            double shortNow = sma(closes, i, shortPeriod);
+            double longNow = sma(closes, i, longPeriod);
+            double shortPrevious = sma(closes, i - 1, shortPeriod);
+            double longPrevious = sma(closes, i - 1, longPeriod);
+            signals.add(shortPrevious <= longPrevious && shortNow > longNow ? Signal.BUY
+                    : shortPrevious >= longPrevious && shortNow < longNow ? Signal.SELL : Signal.HOLD);
+        }
+        return signals;
+    }
+
+    private static double sma(double[] values, int endIndex, int period) {
+        double total = 0;
+        for (int i = endIndex - period + 1; i <= endIndex; i++) {
+            total += values[i];
+        }
+        return total / period;
     }
 
     /**

@@ -48,6 +48,18 @@ class IntradayBacktestEngineTest {
         assertThat(result.finalEquity()).isEqualByComparingTo("1000");
     }
 
+    @Test
+    void buysAtFirstOpenWhenInitialSignalWasAlreadyKnown() {
+        IntradayBacktestResult result = engine.run(
+                List.of(bar("2026-09-25T08:00:00Z", 100, 120)),
+                List.of(Signal.HOLD), Signal.BUY, BigDecimal.valueOf(1000),
+                IntradayBacktestEngine.ExecutionConfig.fromBasisPoints(BigDecimal.ZERO, BigDecimal.ZERO));
+
+        assertThat(result.trades()).hasSize(1);
+        assertThat(result.trades().get(0).price()).isEqualByComparingTo("100");
+        assertThat(result.finalEquity()).isEqualByComparingTo("1200");
+    }
+
     private static IntradayBar bar(String time, double open, double close) {
         BigDecimal high = BigDecimal.valueOf(Math.max(open, close));
         BigDecimal low = BigDecimal.valueOf(Math.min(open, close));

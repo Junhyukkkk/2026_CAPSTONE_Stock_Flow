@@ -3,6 +3,8 @@ package com.stockflow.realtime.backtest;
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
 import com.stockflow.realtime.backtest.dto.BacktestDataReadinessResponse;
 import com.stockflow.realtime.backtest.dto.IntradayBacktestDataReadinessResponse;
+import com.stockflow.realtime.backtest.dto.IntradayBacktestResponse;
+import com.stockflow.realtime.backtest.dto.IntradayRunRequest;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
 import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
@@ -129,6 +131,13 @@ public class BacktestController {
             @RequestParam(defaultValue = "200") int minimumHistoryBars) {
         return ResponseEntity.ok(runService.inspectIntradayDataReadiness(
                 symbol, from, to, interval, source, minimumHistoryBars));
+    }
+
+    @PostMapping("/intraday/run")
+    @Operation(summary = "BTCUSDT 1분봉 백테스트 실행",
+            description = "BUY_AND_HOLD 또는 MA_CROSSOVER를 1분봉 종가 신호·다음 1분봉 시가 체결 기준으로 실행합니다. 현재 BTCUSDT, 최대 6시간을 지원합니다.")
+    public ResponseEntity<IntradayBacktestResponse> runIntraday(@Valid @RequestBody IntradayRunRequest request) {
+        return ResponseEntity.ok(runService.runIntraday(request));
     }
 
     @PostMapping("/performance-report")

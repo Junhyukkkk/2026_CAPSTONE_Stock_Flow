@@ -26,7 +26,20 @@ public class IntradayBacktestEngine {
             List<Signal> signals,
             BigDecimal initialCash,
             ExecutionConfig config) {
-        validateInputs(bars, signals, initialCash, config);
+        return run(bars, signals, Signal.HOLD, initialCash, config);
+    }
+
+    /**
+     * @param initialSignal 선택 구간 직전 봉 마감 때 이미 확정된 신호. Buy & Hold는 구간 첫 봉 시가에
+     *                      진입하기 위해 BUY를 전달하고, 일반 기술적 전략은 HOLD 또는 직전 봉의 신호를 전달한다.
+     */
+    public IntradayBacktestResult run(
+            List<IntradayBar> bars,
+            List<Signal> signals,
+            Signal initialSignal,
+            BigDecimal initialCash,
+            ExecutionConfig config) {
+        validateInputs(bars, signals, initialSignal, initialCash, config);
 
         BigDecimal cash = initialCash;
         BigDecimal quantity = BigDecimal.ZERO;
@@ -44,7 +57,7 @@ public class IntradayBacktestEngine {
             validateBar(bar);
 
             // i-1 봉 마감 후 생성된 신호만 i 봉 시가에 체결한다.
-            Signal executableSignal = i == 0 ? Signal.HOLD : signals.get(i - 1);
+            Signal executableSignal = i == 0 ? initialSignal : signals.get(i - 1);
             BigDecimal open = bar.open();
             boolean holding = quantity.signum() > 0;
 
@@ -98,12 +111,15 @@ public class IntradayBacktestEngine {
     }
 
     private static void validateInputs(List<IntradayBar> bars, List<Signal> signals,
-                                       BigDecimal initialCash, ExecutionConfig config) {
+                                       Signal initialSignal, BigDecimal initialCash, ExecutionConfig config) {
         if (bars == null || bars.isEmpty()) {
             throw new IllegalArgumentException("bars must not be empty");
         }
         if (signals == null || signals.size() != bars.size()) {
             throw new IllegalArgumentException("signals size must match bars size");
+        }
+        if (initialSignal == null) {
+            throw new IllegalArgumentException("initialSignal must not be null");
         }
         if (initialCash == null || initialCash.signum() <= 0) {
             throw new IllegalArgumentException("initialCash must be positive");
