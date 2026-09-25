@@ -15,11 +15,11 @@ public class IntradayRunRequest {
     @NotBlank
     private String symbol;
 
-    /** BUY_AND_HOLD | MA_CROSSOVER */
+    /** BUY_AND_HOLD | MA_CROSSOVER | PREDICTION */
     @NotBlank
     private String strategyType;
 
-    /** MA_CROSSOVER: shortPeriod, longPeriod. */
+    /** MA_CROSSOVER: shortPeriod, longPeriod. PREDICTION: model, warmup, refitEvery 등. */
     private Map<String, Object> params;
 
     /** 미지정 시 10000 USDT. */

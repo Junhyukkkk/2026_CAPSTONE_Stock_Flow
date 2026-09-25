@@ -37,6 +37,7 @@ import com.stockflow.realtime.backtest.repository.BacktestStrategyRepository;
 import com.stockflow.realtime.backtest.repository.BacktestStrategyRepository.StrategyRow;
 import com.stockflow.realtime.prediction.PredictionService;
 import com.stockflow.realtime.prediction.PredictionSignalResponse;
+import com.stockflow.realtime.prediction.IntradayPredictionSignalResponse;
 import com.stockflow.realtime.stock.IntradayOhlcvService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -212,13 +213,16 @@ public class BacktestRunService {
     }
 
     /**
-     * BTCUSDT 1분봉의 기준 전략을 즉석 실행한다. 일봉 실행·저장 테이블과 분리해 결과를 반환한다.
+     * BTCUSDT 1분봉 전략을 즉석 실행한다. 일봉 실행·저장 테이블과 분리해 결과를 반환한다.
      */
     public IntradayBacktestResponse runIntraday(IntradayRunRequest request) {
         String symbol = normalizeIntradaySymbol(request.getSymbol());
         StrategyType strategyType = StrategyType.from(request.getStrategyType());
-        if (strategyType != StrategyType.BUY_AND_HOLD && strategyType != StrategyType.MA_CROSSOVER) {
-            throw new IllegalArgumentException("intraday backtest currently supports BUY_AND_HOLD and MA_CROSSOVER");
+        if (strategyType != StrategyType.BUY_AND_HOLD
+                && strategyType != StrategyType.MA_CROSSOVER
+                && strategyType != StrategyType.PREDICTION) {
+            throw new IllegalArgumentException(
+                    "intraday backtest currently supports BUY_AND_HOLD, MA_CROSSOVER, and PREDICTION");
         }
         Instant start = truncateToMinute(request.getFrom());
         Instant end = truncateToMinute(request.getTo());
@@ -228,11 +232,6 @@ public class BacktestRunService {
         if (initialCash.signum() <= 0) {
             throw new IllegalArgumentException("initialCash must be positive");
         }
-        BigDecimal feeBps = request.getFeeBps() == null ? BigDecimal.TEN : request.getFeeBps();
-        BigDecimal slippageBps = request.getSlippageBps() == null ? BigDecimal.valueOf(5) : request.getSlippageBps();
-        validateBasisPoints(feeBps, "feeBps");
-        validateBasisPoints(slippageBps, "slippageBps");
-
         List<IntradayBar> selectedBars = toIntradayBars(
                 intradayOhlcvService.getIntraday(symbol, "1m", start, end));
         int expectedBars = Math.toIntExact(Duration.between(start, end).toMinutes());
@@ -241,12 +240,28 @@ public class BacktestRunService {
         }
 
         Map<String, Object> params = request.getParams() == null ? Map.of() : new LinkedHashMap<>(request.getParams());
+        if (request.getFeeBps() != null) {
+            params.put("feeBps", request.getFeeBps());
+        }
+        if (request.getSlippageBps() != null) {
+            params.put("slippageBps", request.getSlippageBps());
+        }
+        BigDecimal feeBps;
+        BigDecimal slippageBps;
         List<Signal> selectedSignals;
         Signal initialSignal;
         if (strategyType == StrategyType.BUY_AND_HOLD) {
+            feeBps = decimalParamOrDefault(params, "feeBps", BigDecimal.TEN);
+            slippageBps = decimalParamOrDefault(params, "slippageBps", BigDecimal.valueOf(5));
+            validateBasisPoints(feeBps, "feeBps");
+            validateBasisPoints(slippageBps, "slippageBps");
             selectedSignals = holdSignals(selectedBars.size());
             initialSignal = Signal.BUY;
-        } else {
+        } else if (strategyType == StrategyType.MA_CROSSOVER) {
+            feeBps = decimalParamOrDefault(params, "feeBps", BigDecimal.TEN);
+            slippageBps = decimalParamOrDefault(params, "slippageBps", BigDecimal.valueOf(5));
+            validateBasisPoints(feeBps, "feeBps");
+            validateBasisPoints(slippageBps, "slippageBps");
             int shortPeriod = positiveIntParam(params, "shortPeriod", 5);
             int longPeriod = positiveIntParam(params, "longPeriod", 20);
             if (shortPeriod >= longPeriod || longPeriod > 240) {
@@ -268,6 +283,27 @@ public class BacktestRunService {
             List<Signal> allSignals = maCrossoverSignals(signalBars, shortPeriod, longPeriod);
             initialSignal = allSignals.get(historyBars.size() - 1);
             selectedSignals = new ArrayList<>(allSignals.subList(historyBars.size(), allSignals.size()));
+        } else {
+            IntradayPredictionBacktestConfig predictionConfig = IntradayPredictionBacktestConfig.from(params);
+            if ("CHRONOS_BOLT".equals(predictionConfig.model()) && selectedBars.size() > 60) {
+                throw new IllegalArgumentException(
+                        "Chronos-Bolt 1분봉 백테스트는 CPU 응답 시간을 고려해 현재 최대 60분까지만 지원합니다.");
+            }
+            IntradayPredictionSignalResponse response = predictionService.backtestIntradaySignals(
+                    predictionConfig.toRequest(symbol, start, end));
+            IntradaySignals predictionSignals = alignIntradayPredictionSignals(selectedBars, response);
+            initialSignal = predictionSignals.initialSignal();
+            selectedSignals = predictionSignals.signals();
+            feeBps = BigDecimal.valueOf(predictionConfig.feeBps());
+            slippageBps = BigDecimal.valueOf(predictionConfig.slippageBps());
+            params = new LinkedHashMap<>(predictionConfig.asParams());
+            params.put("buySignalCount", response.buyCount());
+            params.put("holdSignalCount", response.holdCount());
+            params.put("sellSignalCount", response.sellCount());
+            params.put("mae", response.mae());
+            params.put("rmse", response.rmse());
+            params.put("maePct", response.maePct());
+            params.put("rmsePct", response.rmsePct());
         }
 
         IntradayBacktestResult result = intradayBacktestEngine.run(
@@ -325,6 +361,62 @@ public class BacktestRunService {
         } catch (NumberFormatException exception) {
             throw new IllegalArgumentException(key + " must be an integer");
         }
+    }
+
+    private static BigDecimal decimalParamOrDefault(Map<String, Object> params, String key, BigDecimal defaultValue) {
+        Object raw = params.get(key);
+        if (raw == null) {
+            return defaultValue;
+        }
+        try {
+            return raw instanceof BigDecimal value ? value : new BigDecimal(raw.toString());
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(key + " must be a number", exception);
+        }
+    }
+
+    /**
+     * FastAPI는 signal_time의 종가를 보고 execution_time(다음 1분)의 신호를 반환한다.
+     * 엔진은 signals[i - 1]을 i번째 분의 시가에 체결하므로 실행 시각 기준으로 한 칸 맞춘다.
+     */
+    private IntradaySignals alignIntradayPredictionSignals(
+            List<IntradayBar> bars, IntradayPredictionSignalResponse response) {
+        if (response.signals() == null) {
+            throw new IllegalStateException("Prediction service returned no intraday signals");
+        }
+        Map<Instant, Signal> byExecutionTime = new HashMap<>();
+        for (IntradayPredictionSignalResponse.IntradayPredictionSignalPoint point : response.signals()) {
+            Instant executionTime = truncateToMinute(point.executionTime());
+            Signal signal;
+            try {
+                signal = Signal.valueOf(point.signal().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException | NullPointerException exception) {
+                throw new IllegalStateException("Invalid intraday prediction signal: " + point.signal(), exception);
+            }
+            if (byExecutionTime.put(executionTime, signal) != null) {
+                throw new IllegalStateException("Duplicate prediction signal time: " + executionTime);
+            }
+        }
+
+        List<Signal> signalsAtExecutionTime = bars.stream()
+                .map(bar -> {
+                    Signal signal = byExecutionTime.get(truncateToMinute(bar.time()));
+                    if (signal == null) {
+                        throw new IllegalStateException(
+                                "Missing prediction signal for execution time: " + bar.time());
+                    }
+                    return signal;
+                })
+                .toList();
+        List<Signal> delayedSignals = new ArrayList<>(bars.size());
+        for (int index = 0; index < bars.size(); index++) {
+            delayedSignals.add(index + 1 < bars.size()
+                    ? signalsAtExecutionTime.get(index + 1) : Signal.HOLD);
+        }
+        return new IntradaySignals(signalsAtExecutionTime.get(0), delayedSignals);
+    }
+
+    private record IntradaySignals(Signal initialSignal, List<Signal> signals) {
     }
 
     private static List<IntradayBar> toIntradayBars(
