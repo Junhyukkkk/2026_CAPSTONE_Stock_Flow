@@ -26,7 +26,8 @@ public record IntradayBacktestResponse(
         BigDecimal winRatePct,
         int barCount,
         List<Trade> trades,
-        List<EquityPoint> equityCurve
+        List<EquityPoint> equityCurve,
+        List<PredictionPoint> predictionPoints
 ) {
     public record Trade(
             int seq,
@@ -48,5 +49,17 @@ public record IntradayBacktestResponse(
         public static EquityPoint from(IntradayBacktestResult.EquityPoint point) {
             return new EquityPoint(point.time(), point.equity(), point.drawdownPct());
         }
+    }
+
+    /** 실제 1분봉의 다음 시가에 실행할 때 사용한 예측 포인트. */
+    public record PredictionPoint(
+            Instant signalTime,
+            Instant executionTime,
+            BigDecimal referencePrice,
+            BigDecimal predictedPrice,
+            BigDecimal expectedReturnPct,
+            BigDecimal thresholdPct,
+            String signal
+    ) {
     }
 }

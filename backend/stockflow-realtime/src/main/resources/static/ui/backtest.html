@@ -40,6 +40,13 @@
                 <input type="text" id="symbol" placeholder="예: BTCUSDT" value="BTCUSDT">
             </div>
             <div class="field">
+                <label>백테스트 주기</label>
+                <select id="backtestInterval" onchange="renderParams(); updateIntervalFields()">
+                    <option value="1d" selected>일봉</option>
+                    <option value="1m">1분봉 (BTCUSDT)</option>
+                </select>
+            </div>
+            <div class="field">
                 <label>전략 타입</label>
                 <select id="strategyType" onchange="renderParams()">
                     <option value="PREDICTION" selected>PREDICTION (예측 기반)</option>
@@ -56,6 +63,10 @@
                 <div class="field"><label>시작일</label><input type="date" id="from"></div>
                 <div class="field"><label>종료일</label><input type="date" id="to"></div>
             </div>
+            <div class="row hidden" id="intradayTimeFields">
+                <div class="field"><label>시작 시각</label><input type="datetime-local" id="intradayFrom"></div>
+                <div class="field"><label>종료 시각</label><input type="datetime-local" id="intradayTo"></div>
+            </div>
             <div id="dataReadiness" class="readiness hidden" aria-live="polite"></div>
             <div id="reportUniverse" class="hint" aria-live="polite"></div>
             <div class="flex">
@@ -64,7 +75,7 @@
                 <button class="btn-ghost" id="reportBtn" onclick="runPerformanceReport()">대표 코인 성과 리포트</button>
                 <button class="btn-ghost" id="allCryptoReportBtn" onclick="runAllCryptoPerformanceReport()">전체 코인 자동 리포트</button>
                 <button class="btn-ghost" id="thresholdBtn" onclick="runThresholdReport()">신호 기준 계수 비교</button>
-                <button class="btn-ghost" onclick="saveStrategy()">전략 저장</button>
+                <button class="btn-ghost" id="saveBtn" onclick="saveStrategy()">전략 저장</button>
             </div>
         </div>
 
@@ -135,7 +146,7 @@
     <div id="result" class="hidden">
         <div class="grid grid-4 mt-16">
             <div class="card stat"><div class="label">누적 수익률</div><div class="value" id="rTotal">-</div></div>
-            <div class="card stat"><div class="label">CAGR</div><div class="value" id="rCagr">-</div></div>
+            <div class="card stat"><div class="label" id="rCagrLabel">CAGR</div><div class="value" id="rCagr">-</div></div>
             <div class="card stat"><div class="label">최대 낙폭 (MDD)</div><div class="value down" id="rMdd">-</div></div>
             <div class="card stat"><div class="label">승률 / 왕복거래</div><div class="value" id="rWin">-</div></div>
         </div>
@@ -155,7 +166,7 @@
             </div>
             <div style="max-height:360px; overflow-y:auto;">
                 <table>
-                    <thead><tr><th>신호일</th><th>실행일</th><th>실제 종가</th><th>예측 종가</th><th>예측 오차</th><th>예상 수익률</th><th>판단 기준</th><th>신호</th></tr></thead>
+                    <thead><tr><th>신호 시각</th><th>실행 시각</th><th>실제 종가</th><th>예측 종가</th><th>예측 오차</th><th>예상 수익률</th><th>판단 기준</th><th>신호</th></tr></thead>
                     <tbody id="predictionAnalysisBody"></tbody>
                 </table>
             </div>
@@ -181,12 +192,47 @@
     </div>
 </div>
 
-<script src="assets/api.js?performance-report-jobs-20260925"></script>
+<script src="assets/api.js?intraday-backtest-20260925"></script>
 <script>
     renderNav('backtest.html');
 
     document.getElementById('from').value = isoDaysAgo(62);
     document.getElementById('to').value = isoDaysAgo(1);
+
+    function isIntradayMode() {
+        return document.getElementById('backtestInterval').value === '1m';
+    }
+
+    function toDatetimeLocalValue(date) {
+        const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+        return offsetDate.toISOString().slice(0, 16);
+    }
+
+    function intradayInputToIso(id) {
+        const value = document.getElementById(id).value;
+        return value ? new Date(value).toISOString() : '';
+    }
+
+    function updateIntervalFields() {
+        const intraday = isIntradayMode();
+        document.getElementById('intradayTimeFields').classList.toggle('hidden', !intraday);
+        document.getElementById('from').closest('.row').classList.toggle('hidden', intraday);
+        document.getElementById('compareBtn').classList.toggle('hidden', intraday);
+        document.getElementById('thresholdBtn').classList.toggle('hidden', intraday);
+        document.getElementById('reportBtn').classList.toggle('hidden', intraday);
+        document.getElementById('allCryptoReportBtn').classList.toggle('hidden', intraday);
+        document.getElementById('saveBtn').classList.toggle('hidden', intraday);
+        document.getElementById('symbol').value = intraday ? 'BTCUSDT' : document.getElementById('symbol').value;
+        if (!document.getElementById('intradayFrom').value) {
+            const end = new Date();
+            end.setSeconds(0, 0);
+            end.setMinutes(0);
+            const start = new Date(end.getTime() - 60 * 60 * 1000);
+            document.getElementById('intradayFrom').value = toDatetimeLocalValue(start);
+            document.getElementById('intradayTo').value = toDatetimeLocalValue(end);
+        }
+        scheduleDataReadinessCheck();
+    }
 
     // ---- 전략 파라미터 동적 폼 ----
     const PARAM_DEFS = {
@@ -197,6 +243,7 @@
     };
     function renderParams() {
         const type = document.getElementById('strategyType').value;
+        const intraday = isIntradayMode();
         const defs = PARAM_DEFS[type];
         const el = document.getElementById('paramFields');
         hideComparison();
@@ -216,15 +263,15 @@
                 </div>
                 <details class="advanced-settings">
                     <summary>고급 설정</summary>
-                    <div class="hint" style="margin-bottom:14px;">백테스트 데이터: Binance 암호화폐 일봉</div>
+                    <div class="hint" style="margin-bottom:14px;">백테스트 데이터: Binance 암호화폐 ${intraday ? '1분봉' : '일봉'}</div>
                     <div class="row">
                         <div class="field">
-                            <label>최소 학습 일수</label>
+                            <label>최소 학습 ${intraday ? '분봉 수' : '일수'}</label>
                             <input type="number" data-param="warmup" value="50" min="50" max="500"
                                    oninput="validateWarmupInput(this); scheduleDataReadinessCheck(); schedulePerformanceReportUniverseCheck()">
-                            <div class="hint" id="warmupHelp">최소 50개의 실제 일봉 데이터가 필요합니다.</div>
+                            <div class="hint" id="warmupHelp">최소 50개의 실제 ${intraday ? '1분봉' : '일봉'} 데이터가 필요합니다.</div>
                         </div>
-                        <div class="field"><label>모델 갱신 주기(일)</label><input type="number" data-param="refitEvery" value="5" min="1" max="30"></div>
+                        <div class="field"><label>모델 갱신 주기(${intraday ? '분' : '일'})</label><input type="number" data-param="refitEvery" value="5" min="1" max="${intraday ? 15 : 30}"></div>
                     </div>
                     <div class="row">
                         <div class="field"><label>변동성 계산 기간</label><input type="number" data-param="volatilityWindow" value="20" min="5"></div>
@@ -258,11 +305,12 @@
     function validateWarmupInput(input, notify = false) {
         const value = Number(input.value);
         const invalid = !Number.isInteger(value) || value < 50;
-        const message = '최소 학습 일수는 50일 이상으로 입력해 주세요.';
+        const unit = isIntradayMode() ? '분봉 수' : '일수';
+        const message = `최소 학습 ${unit}는 50 이상으로 입력해 주세요.`;
         input.setCustomValidity(invalid ? message : '');
         const help = document.getElementById('warmupHelp');
         if (help) {
-            help.textContent = invalid ? message : '최소 50개의 실제 일봉 데이터가 필요합니다.';
+            help.textContent = invalid ? message : `최소 50개의 실제 ${isIntradayMode() ? '1분봉' : '일봉'} 데이터가 필요합니다.`;
             help.style.color = invalid ? 'var(--red)' : '';
         }
         if (invalid && notify) toast(message, 'err');
@@ -343,30 +391,44 @@
             ? 'ready' : readiness.status === 'WARNING' ? 'warning' : 'blocked';
         const statusLabel = readiness.status === 'READY'
             ? '실행 가능' : readiness.status === 'WARNING' ? '실행 가능 (주의)' : '실행 불가';
-        const history = readiness.minimumHistoryDays > 0
-            ? `시작 전 학습 데이터 ${readiness.historyBarCount} / ${readiness.minimumHistoryDays}개`
+        const intraday = readiness.interval === '1m';
+        const minimumHistory = intraday ? readiness.minimumHistoryBars : readiness.minimumHistoryDays;
+        const historyCount = intraday ? readiness.historyBarCount : readiness.historyBarCount;
+        const history = minimumHistory > 0
+            ? `시작 전 학습 데이터 ${historyCount} / ${minimumHistory}개`
             : '추가 학습 데이터 조건 없음';
         const missing = readiness.missingBarCount > 0
-            ? ` · 선택 구간 누락 ${readiness.missingBarCount}일` : '';
-        const available = readiness.firstAvailableDate && readiness.lastAvailableDate
-            ? `저장 범위 ${readiness.firstAvailableDate} ~ ${readiness.lastAvailableDate}` : '저장된 일봉 없음';
+            ? ` · 선택 구간 누락 ${readiness.missingBarCount}${intraday ? '분' : '일'}` : '';
+        const firstAvailable = intraday ? readiness.firstAvailableTime : readiness.firstAvailableDate;
+        const lastAvailable = intraday ? readiness.lastAvailableTime : readiness.lastAvailableDate;
+        const available = firstAvailable && lastAvailable
+            ? `저장 범위 ${intraday ? fmtTimestamp(firstAvailable) : firstAvailable} ~ ${intraday ? fmtTimestamp(lastAvailable) : lastAvailable}`
+            : `저장된 ${intraday ? '1분봉' : '일봉'} 없음`;
         el.className = `readiness ${statusClass}`;
         el.innerHTML = `<strong>${statusLabel} · ${readiness.message}</strong>`
-            + `선택 구간 일봉 ${readiness.selectedBarCount} / ${readiness.expectedBarCount}개${missing}`
+            + `선택 구간 ${intraday ? '1분봉' : '일봉'} ${readiness.selectedBarCount} / ${readiness.expectedBarCount}개${missing}`
             + ` · ${history} · ${available}`;
     }
 
     async function fetchDataReadiness(body) {
+        if (body.interval === '1m') {
+            return API.intradayBacktestReadiness(
+                body.symbol, body.from, body.to, Number(body.params.warmup || 50), body.params.source || 'BINANCE');
+        }
         return API.backtestReadiness(
             body.symbol, body.from, body.to,
             body.strategyType === 'PREDICTION' ? Number(body.params.warmup || 50) : 0,
             body.params.source || 'BINANCE');
     }
 
+    function readinessCanRun(readiness) {
+        return readiness.interval === '1m' ? readiness.canUseForBacktest : readiness.canRun;
+    }
+
     async function checkDataReadiness() {
         const symbol = document.getElementById('symbol').value.trim().toUpperCase();
-        const from = document.getElementById('from').value;
-        const to = document.getElementById('to').value;
+        const from = isIntradayMode() ? intradayInputToIso('intradayFrom') : document.getElementById('from').value;
+        const to = isIntradayMode() ? intradayInputToIso('intradayTo') : document.getElementById('to').value;
         const el = document.getElementById('dataReadiness');
         if (!symbol || !from || !to || from > to) {
             el.className = 'readiness hidden';
@@ -415,6 +477,7 @@
         return message;
     }
     renderParams();
+    updateIntervalFields();
     schedulePerformanceReportUniverseCheck();
     ['symbol', 'from', 'to'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => {
@@ -422,20 +485,25 @@
             if (id !== 'symbol') schedulePerformanceReportUniverseCheck();
         });
     });
+    ['intradayFrom', 'intradayTo'].forEach(id => {
+        document.getElementById(id).addEventListener('change', scheduleDataReadinessCheck);
+    });
 
     function buildRunBody() {
         const params = collectParams();
         if (document.getElementById('strategyType').value === 'PREDICTION') {
             params.source = 'BINANCE';
         }
-        return {
+        const body = {
             symbol: document.getElementById('symbol').value.trim().toUpperCase(),
             strategyType: document.getElementById('strategyType').value,
             params,
             initialCash: Number(document.getElementById('initialCash').value),
-            from: document.getElementById('from').value,
-            to: document.getElementById('to').value,
+            from: isIntradayMode() ? intradayInputToIso('intradayFrom') : document.getElementById('from').value,
+            to: isIntradayMode() ? intradayInputToIso('intradayTo') : document.getElementById('to').value,
         };
+        if (isIntradayMode()) body.interval = '1m';
+        return body;
     }
 
     // ---- 백테스트 실행 ----
@@ -446,7 +514,7 @@
         try {
             const readiness = await fetchDataReadiness(body);
             renderDataReadiness(readiness);
-            if (!readiness.canRun) {
+            if (!readinessCanRun(readiness)) {
                 toast(readiness.message, 'err');
                 return;
             }
@@ -461,7 +529,9 @@
             button.disabled = true;
             button.textContent = '실행 중...';
             toast('백테스트 실행 중...');
-            const run = await API.runAdHoc(body);
+            const run = body.interval === '1m'
+                ? await API.runIntraday(body)
+                : await API.runAdHoc(body);
             await showResult(run);
             toast('백테스트 완료', 'ok');
         } catch (e) { toast('실행 실패: ' + friendlyBacktestError(e), 'err'); }
@@ -474,7 +544,12 @@
 
     let eqChart = null, ddChart = null, priceChart = null;
     async function showResult(run) {
+        if (run.interval === '1m') {
+            await showIntradayResult(run);
+            return;
+        }
         document.getElementById('result').classList.remove('hidden');
+        document.getElementById('rCagrLabel').textContent = 'CAGR';
         const tr = Number(run.totalReturnPct);
         document.getElementById('rTotal').textContent = fmtPct(run.totalReturnPct);
         document.getElementById('rTotal').className = 'value ' + signClass(tr);
@@ -562,6 +637,127 @@
             <tr>
                 <td>${t.seq}</td><td>${t.tradeDate}</td>
                 <td class="${t.side==='BUY'?'up':'down'}">${t.side}</td>
+                <td>${fmtPrice(t.price)}</td><td>${fmtNum(t.quantity, 4)}</td>
+                <td>${fmtNum(t.cashAfter)}</td><td>${fmtNum(t.equityAfter)}</td>
+                <td class="${signClass(t.pnlPct)}">${t.pnlPct != null ? fmtPct(t.pnlPct) : '-'}</td>
+            </tr>`).join('') : '<tr><td colspan="8" class="muted center">체결 없음</td></tr>';
+    }
+
+    async function showIntradayResult(run) {
+        document.getElementById('result').classList.remove('hidden');
+        const tr = Number(run.totalReturnPct);
+        document.getElementById('rTotal').textContent = fmtPct(run.totalReturnPct);
+        document.getElementById('rTotal').className = 'value ' + signClass(tr);
+        document.getElementById('rCagrLabel').textContent = '수수료 / 슬리피지';
+        document.getElementById('rCagr').textContent = `${fmtNum(run.feeBps, 0)}bp / ${fmtNum(run.slippageBps, 0)}bp`;
+        document.getElementById('rMdd').textContent = fmtPct(run.mddPct);
+        document.getElementById('rWin').textContent =
+            `${run.winRatePct != null ? fmtNum(run.winRatePct) + '%' : '-'} / ${run.roundTripCount ?? 0}건`;
+        document.getElementById('resultTitle').textContent = `${run.symbol} · 1분봉 ${run.strategyType}`;
+        document.getElementById('resultMeta').textContent =
+            `${fmtTimestamp(run.from)} ~ ${fmtTimestamp(run.to)} · 초기 ${fmtNum(run.initialCash)} → 최종 ${fmtNum(run.finalEquity)} · ${run.barCount ?? 0} bars`
+            + (run.strategyType === 'PREDICTION' ? ` · ${run.params?.model ?? ''}` : '');
+
+        const prices = await API.intraday(run.symbol, '1m', run.from, run.to);
+        const trades = run.trades || [];
+        const predictionPoints = run.predictionPoints || [];
+        const toSec = value => Math.floor(new Date(value).getTime() / 1000);
+
+        if (priceChart) priceChart.remove();
+        const elP = document.getElementById('priceChart');
+        elP.innerHTML = '';
+        const priceLegend = document.getElementById('priceLegend');
+        priceLegend.innerHTML = predictionPoints.length
+            ? `<span class="legend-item"><span class="legend-candle"></span>실제 1분봉</span>
+               <span class="legend-item"><span class="legend-line" style="border-color:#ffd166"></span>예측 종가</span>
+               <span class="muted">BUY / SELL은 다음 분 시가 가상 체결</span>`
+            : '<span class="muted">BUY / SELL은 다음 분 시가 가상 체결</span>';
+        if (prices?.length) {
+            priceChart = LightweightCharts.createChart(elP, baseChartOpts(360));
+            const candles = priceChart.addCandlestickSeries({
+                upColor: '#16a34a', downColor: '#e0334f', wickUpColor: '#16a34a',
+                wickDownColor: '#e0334f', borderVisible: false,
+            });
+            candles.setData(prices.map(p => ({
+                time: toSec(p.time), open: +p.open, high: +p.high, low: +p.low, close: +p.close,
+            })));
+            candles.setMarkers(trades.map(t => ({
+                time: toSec(t.time), position: t.side === 'BUY' ? 'belowBar' : 'aboveBar',
+                color: t.side === 'BUY' ? '#16a34a' : '#e0334f',
+                shape: t.side === 'BUY' ? 'arrowUp' : 'arrowDown', text: t.side,
+            })));
+            if (predictionPoints.length) {
+                const predictionLine = priceChart.addLineSeries({
+                    color: '#ffd166', lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
+                });
+                predictionLine.setData(predictionPoints.map(point => ({
+                    time: toSec(point.executionTime), value: +point.predictedPrice,
+                })));
+            }
+            priceChart.timeScale().fitContent();
+        } else {
+            elP.innerHTML = '<div class="spinner">선택한 구간의 1분봉 데이터가 없습니다.</div>';
+        }
+
+        renderIntradayPredictionAnalysis(run, prices, predictionPoints);
+        renderIntradayEquity(run);
+        renderIntradayTrades(trades);
+    }
+
+    function renderIntradayPredictionAnalysis(run, prices, points) {
+        const section = document.getElementById('predictionAnalysis');
+        const body = document.getElementById('predictionAnalysisBody');
+        if (run.strategyType !== 'PREDICTION' || !points.length) {
+            section.classList.add('hidden');
+            body.innerHTML = '';
+            return;
+        }
+        const actualCloseByTime = new Map((prices || []).map(price => [price.time, Number(price.close)]));
+        document.getElementById('predictionAnalysisMeta').textContent =
+            `${run.params?.model ?? 'PREDICTION'} · 예측 종가와 실행 시각 실제 종가 비교`;
+        body.innerHTML = points.map(point => {
+            const actualClose = actualCloseByTime.get(point.executionTime);
+            const errorPct = actualClose == null ? null : ((Number(point.predictedPrice) / actualClose) - 1) * 100;
+            const signalClass = point.signal === 'BUY' ? 'signal-buy'
+                : point.signal === 'SELL' ? 'signal-sell' : 'signal-hold';
+            return `<tr>
+                <td>${fmtTimestamp(point.signalTime)}</td><td>${fmtTimestamp(point.executionTime)}</td>
+                <td>${fmtPrice(actualClose)}</td><td>${fmtPrice(point.predictedPrice)}</td>
+                <td class="${signClass(errorPct)}">${fmtPct(errorPct)}</td>
+                <td class="${signClass(point.expectedReturnPct)}">${fmtPct(point.expectedReturnPct)}</td>
+                <td>${fmtPct(point.thresholdPct)}</td><td class="${signalClass}">${point.signal}</td>
+            </tr>`;
+        }).join('');
+        section.classList.remove('hidden');
+    }
+
+    function renderIntradayEquity(run) {
+        if (eqChart) eqChart.remove();
+        if (ddChart) ddChart.remove();
+        const elE = document.getElementById('equityChart'); elE.innerHTML = '';
+        const elD = document.getElementById('ddChart'); elD.innerHTML = '';
+        const toSec = value => Math.floor(new Date(value).getTime() / 1000);
+        const curve = run.equityCurve || [];
+        if (!curve.length) {
+            elE.innerHTML = '<div class="spinner">자산 곡선 데이터가 없습니다.</div>';
+            return;
+        }
+        eqChart = LightweightCharts.createChart(elE, baseChartOpts(360));
+        eqChart.addAreaSeries({ lineColor: '#2563eb', topColor: '#2563eb33', bottomColor: '#2563eb00', lineWidth: 2 })
+            .setData(curve.map(p => ({ time: toSec(p.time), value: +p.equity })));
+        eqChart.timeScale().fitContent();
+        ddChart = LightweightCharts.createChart(elD, baseChartOpts(180));
+        ddChart.addAreaSeries({ lineColor: '#e0334f', topColor: '#e0334f00', bottomColor: '#e0334f33', lineWidth: 1 })
+            .setData(curve.map(p => ({ time: toSec(p.time), value: +p.drawdownPct })));
+        ddChart.timeScale().fitContent();
+    }
+
+    function renderIntradayTrades(trades) {
+        const body = document.getElementById('tradeBody');
+        body.innerHTML = trades.length ? trades.map(t => `
+            <tr>
+                <td>${t.seq}</td><td>${fmtTimestamp(t.time)}</td>
+                <td class="${t.side === 'BUY' ? 'up' : 'down'}">${t.side}</td>
                 <td>${fmtPrice(t.price)}</td><td>${fmtNum(t.quantity, 4)}</td>
                 <td>${fmtNum(t.cashAfter)}</td><td>${fmtNum(t.equityAfter)}</td>
                 <td class="${signClass(t.pnlPct)}">${t.pnlPct != null ? fmtPct(t.pnlPct) : '-'}</td>

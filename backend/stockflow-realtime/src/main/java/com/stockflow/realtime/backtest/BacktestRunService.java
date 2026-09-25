@@ -250,6 +250,7 @@ public class BacktestRunService {
         BigDecimal slippageBps;
         List<Signal> selectedSignals;
         Signal initialSignal;
+        List<IntradayBacktestResponse.PredictionPoint> predictionPoints = List.of();
         if (strategyType == StrategyType.BUY_AND_HOLD) {
             feeBps = decimalParamOrDefault(params, "feeBps", BigDecimal.TEN);
             slippageBps = decimalParamOrDefault(params, "slippageBps", BigDecimal.valueOf(5));
@@ -304,6 +305,11 @@ public class BacktestRunService {
             params.put("rmse", response.rmse());
             params.put("maePct", response.maePct());
             params.put("rmsePct", response.rmsePct());
+            predictionPoints = response.signals().stream()
+                    .map(point -> new IntradayBacktestResponse.PredictionPoint(
+                            point.signalTime(), point.executionTime(), point.referencePrice(),
+                            point.predictedPrice(), point.expectedReturnPct(), point.thresholdPct(), point.signal()))
+                    .toList();
         }
 
         IntradayBacktestResult result = intradayBacktestEngine.run(
@@ -314,7 +320,8 @@ public class BacktestRunService {
                 result.initialCash(), feeBps, slippageBps, result.finalEquity(), result.totalReturnPct(),
                 result.mddPct(), result.roundTripCount(), result.winRatePct(), result.barCount(),
                 result.trades().stream().map(IntradayBacktestResponse.Trade::from).toList(),
-                result.equityCurve().stream().map(IntradayBacktestResponse.EquityPoint::from).toList());
+                result.equityCurve().stream().map(IntradayBacktestResponse.EquityPoint::from).toList(),
+                predictionPoints);
     }
 
     private String normalizeIntradaySymbol(String symbol) {

@@ -56,10 +56,16 @@ const API = {
     createStrategy: (body) => API.post('/api/backtest/strategies', body),
     deleteStrategy: (id) => API.del(`/api/backtest/strategies/${id}`),
     runAdHoc: (body) => API.post('/api/backtest/run', body),
+    runIntraday: (body) => API.post('/api/backtest/intraday/run', body),
     backtestReadiness: (symbol, from, to, minimumHistoryDays = 0, source = 'BINANCE') =>
         API.get(`/api/backtest/readiness?symbol=${encodeURIComponent(symbol)}`
             + `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
             + `&source=${encodeURIComponent(source)}&minimumHistoryDays=${minimumHistoryDays}`),
+    intradayBacktestReadiness: (symbol, from, to, minimumHistoryBars = 50, source = 'BINANCE') =>
+        API.get(`/api/backtest/intraday-readiness?symbol=${encodeURIComponent(symbol)}`
+            + `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+            + `&interval=1m&source=${encodeURIComponent(source)}`
+            + `&minimumHistoryBars=${minimumHistoryBars}`),
     performanceReport: (body) => API.post('/api/backtest/performance-report', body),
     startAllCryptoPerformanceReport: (body) => API.post('/api/backtest/performance-report/jobs', body),
     performanceReportJob: (jobId) => API.get(`/api/backtest/performance-report/jobs/${jobId}`),
@@ -102,6 +108,12 @@ function signClass(v) {
 function fmtTime(ts) {
     if (!ts) return '-';
     return new Date(ts).toLocaleTimeString('ko-KR');
+}
+function fmtTimestamp(ts) {
+    if (!ts) return '-';
+    return new Date(ts).toLocaleString('ko-KR', {
+        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
 }
 function isoDaysAgo(days) {
     const d = new Date();
