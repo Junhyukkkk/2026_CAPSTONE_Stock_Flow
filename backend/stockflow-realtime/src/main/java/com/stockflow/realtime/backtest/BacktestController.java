@@ -2,6 +2,7 @@ package com.stockflow.realtime.backtest;
 
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
 import com.stockflow.realtime.backtest.dto.BacktestDataReadinessResponse;
+import com.stockflow.realtime.backtest.dto.IntradayBacktestDataReadinessResponse;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
 import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
@@ -25,6 +26,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.List;
 
 @RestController
@@ -113,6 +115,20 @@ public class BacktestController {
             @RequestParam(defaultValue = "0") int minimumHistoryDays) {
         return ResponseEntity.ok(
                 runService.inspectDataReadiness(symbol, from, to, source, minimumHistoryDays));
+    }
+
+    @GetMapping("/intraday-readiness")
+    @Operation(summary = "1분봉 백테스트 데이터 준비 상태 조회",
+            description = "TimescaleDB 1분 연속 집계 기준으로 선택 구간의 실제 분봉 수·누락·학습 이력을 확인합니다. 현재는 BTCUSDT 등의 1m 확장 준비용 API입니다.")
+    public ResponseEntity<IntradayBacktestDataReadinessResponse> getIntradayDataReadiness(
+            @RequestParam String symbol,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(defaultValue = "1m") String interval,
+            @RequestParam(defaultValue = "BINANCE") String source,
+            @RequestParam(defaultValue = "200") int minimumHistoryBars) {
+        return ResponseEntity.ok(runService.inspectIntradayDataReadiness(
+                symbol, from, to, interval, source, minimumHistoryBars));
     }
 
     @PostMapping("/performance-report")

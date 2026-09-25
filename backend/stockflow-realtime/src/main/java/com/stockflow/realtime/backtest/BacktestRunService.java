@@ -2,6 +2,7 @@ package com.stockflow.realtime.backtest;
 
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
 import com.stockflow.realtime.backtest.dto.BacktestDataReadinessResponse;
+import com.stockflow.realtime.backtest.dto.IntradayBacktestDataReadinessResponse;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
 import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
 import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
@@ -31,6 +32,7 @@ import com.stockflow.realtime.backtest.repository.BacktestStrategyRepository;
 import com.stockflow.realtime.backtest.repository.BacktestStrategyRepository.StrategyRow;
 import com.stockflow.realtime.prediction.PredictionService;
 import com.stockflow.realtime.prediction.PredictionSignalResponse;
+import com.stockflow.realtime.stock.IntradayOhlcvService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +40,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.Instant;
+import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
@@ -70,6 +74,7 @@ public class BacktestRunService {
     private final BacktestRunRepository runRepository;
     private final BacktestEngine engine;
     private final PredictionService predictionService;
+    private final IntradayOhlcvService intradayOhlcvService;
 
     /** 저장된 전략으로 백테스트 실행. */
     @Transactional
@@ -140,6 +145,64 @@ public class BacktestRunService {
                 coverage.firstDate(), coverage.lastDate(),
                 selectedBars.size(), expectedBarCount, missingBarCount,
                 historyBarCount, minimumHistoryDays, canRun, status, message);
+    }
+
+    /**
+     * 분봉 백테스트 확장의 1단계. 선택 구간과 직전 학습 구간만 제한 조회해 데이터 연속성을 확인한다.
+     * 현재 예측 API가 지원하는 분봉은 1m뿐이므로 5m는 별도 모델 확장 전까지 명시적으로 막는다.
+     */
+    public IntradayBacktestDataReadinessResponse inspectIntradayDataReadiness(
+            String symbol, Instant from, Instant to, String interval, String source, int minimumHistoryBars) {
+        if (!"1m".equals(interval)) {
+            throw new IllegalArgumentException("intraday backtest readiness currently supports only 1m");
+        }
+        if (from == null || to == null || !from.isBefore(to)) {
+            throw new IllegalArgumentException("from must be earlier than to");
+        }
+        if (Duration.between(from, to).compareTo(Duration.ofHours(6)) > 0) {
+            throw new IllegalArgumentException("intraday readiness range must be within 6 hours");
+        }
+        if (minimumHistoryBars < 50 || minimumHistoryBars > 500) {
+            throw new IllegalArgumentException("minimumHistoryBars must be between 50 and 500");
+        }
+
+        Instant start = from.truncatedTo(java.time.temporal.ChronoUnit.MINUTES);
+        Instant end = to.truncatedTo(java.time.temporal.ChronoUnit.MINUTES);
+        if (!start.isBefore(end)) {
+            throw new IllegalArgumentException("at least one full one-minute bar is required");
+        }
+        String normalizedSymbol = symbol == null ? "" : symbol.trim().toUpperCase(Locale.ROOT);
+        if (normalizedSymbol.isEmpty()) {
+            throw new IllegalArgumentException("symbol is required");
+        }
+        String resolvedSource = source == null || source.isBlank()
+                ? DEFAULT_SOURCE : source.trim().toUpperCase(Locale.ROOT);
+        int expected = Math.toIntExact(Duration.between(start, end).toMinutes());
+        Instant historyFrom = start.minus(Duration.ofMinutes((long) minimumHistoryBars * 2));
+        List<com.stockflow.realtime.stock.dto.IntradayOhlcvResponse> selectedBars =
+                intradayOhlcvService.getIntraday(normalizedSymbol, interval, start, end);
+        List<com.stockflow.realtime.stock.dto.IntradayOhlcvResponse> historyBars =
+                intradayOhlcvService.getIntraday(normalizedSymbol, interval, historyFrom, start);
+        int selected = selectedBars.size();
+        int history = historyBars.size();
+        int missing = Math.max(0, expected - selected);
+        boolean canUse = selected > 0 && missing == 0 && history >= minimumHistoryBars;
+        String status = canUse ? "READY" : "BLOCKED";
+        String message = selected == 0
+                ? "선택한 구간에 사용할 수 있는 1분봉 데이터가 없습니다."
+                : missing > 0
+                ? "선택한 구간에 누락된 1분봉이 있어 분봉 백테스트를 실행할 수 없습니다."
+                : history < minimumHistoryBars
+                ? "시작 시각 이전의 실제 1분봉 학습 데이터가 부족합니다."
+                : "1분봉 데이터가 연속적으로 준비되어 다음 단계의 백테스트 엔진 연결이 가능합니다.";
+        return new IntradayBacktestDataReadinessResponse(
+                normalizedSymbol, resolvedSource, interval, start, end,
+                historyBars.isEmpty() ? (selectedBars.isEmpty() ? null : selectedBars.get(0).getTime())
+                        : historyBars.get(0).getTime(),
+                selectedBars.isEmpty() ? (historyBars.isEmpty() ? null : historyBars.get(historyBars.size() - 1).getTime())
+                        : selectedBars.get(selectedBars.size() - 1).getTime(),
+                selected, expected, missing,
+                history, minimumHistoryBars, canUse, status, message);
     }
 
     /**
