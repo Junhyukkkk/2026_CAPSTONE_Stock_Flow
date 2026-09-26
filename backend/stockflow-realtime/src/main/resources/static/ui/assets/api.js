@@ -1,10 +1,24 @@
 /* StockFlow 프론트엔드 공통 유틸 + API 래퍼 */
 
+async function apiError(res) {
+    const raw = await res.text();
+    let message = raw;
+    try {
+        const payload = JSON.parse(raw);
+        message = payload.detail || payload.message || payload.title || raw;
+    } catch (_) {
+        // Plain-text error responses are already usable.
+    }
+    const error = new Error(message || `요청 처리에 실패했습니다. (${res.status})`);
+    error.status = res.status;
+    return error;
+}
+
 const API = {
     async get(path) {
         const res = await fetch(path, { headers: { 'Accept': 'application/json' } });
         if (res.status === 404) return null;
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        if (!res.ok) throw await apiError(res);
         return res.json();
     },
     async post(path, body) {
@@ -13,7 +27,7 @@ const API = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
-        if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+        if (!res.ok) throw await apiError(res);
         return res.status === 204 ? null : res.json();
     },
     async del(path) {
@@ -42,10 +56,30 @@ const API = {
     createStrategy: (body) => API.post('/api/backtest/strategies', body),
     deleteStrategy: (id) => API.del(`/api/backtest/strategies/${id}`),
     runAdHoc: (body) => API.post('/api/backtest/run', body),
+    runIntraday: (body) => API.post('/api/backtest/intraday/run', body),
+    backtestReadiness: (symbol, from, to, minimumHistoryDays = 0, source = 'BINANCE') =>
+        API.get(`/api/backtest/readiness?symbol=${encodeURIComponent(symbol)}`
+            + `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+            + `&source=${encodeURIComponent(source)}&minimumHistoryDays=${minimumHistoryDays}`),
+    intradayBacktestReadiness: (symbol, from, to, minimumHistoryBars = 50, source = 'BINANCE') =>
+        API.get(`/api/backtest/intraday-readiness?symbol=${encodeURIComponent(symbol)}`
+            + `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+            + `&interval=1m&source=${encodeURIComponent(source)}`
+            + `&minimumHistoryBars=${minimumHistoryBars}`),
+    performanceReport: (body) => API.post('/api/backtest/performance-report', body),
+    startAllCryptoPerformanceReport: (body) => API.post('/api/backtest/performance-report/jobs', body),
+    performanceReportJob: (jobId) => API.get(`/api/backtest/performance-report/jobs/${jobId}`),
+    performanceReportUniverse: (from, to, minimumHistoryDays = 50) =>
+        API.get(`/api/backtest/performance-report/universe?from=${encodeURIComponent(from)}`
+            + `&to=${encodeURIComponent(to)}&minimumHistoryDays=${minimumHistoryDays}`),
+    thresholdReport: (body) => API.post('/api/backtest/performance-report/thresholds', body),
     runSaved: (id, from, to) =>
         API.post(`/api/backtest/strategies/${id}/run?from=${from}&to=${to}`, {}),
     runTrades: (runId) => API.get(`/api/backtest/runs/${runId}/trades`),
     equityCurve: (runId) => API.get(`/api/backtest/runs/${runId}/equity-curve`),
+    predictionPoints: (runId) => API.get(`/api/backtest/runs/${runId}/prediction-points`),
+    predictionCompare: (symbol, interval, horizon) =>
+        API.get(`/api/predictions/${encodeURIComponent(symbol)}/compare?interval=${interval}&horizon=${horizon}`),
 };
 
 // ---- 포맷 헬퍼 ----
@@ -74,6 +108,12 @@ function signClass(v) {
 function fmtTime(ts) {
     if (!ts) return '-';
     return new Date(ts).toLocaleTimeString('ko-KR');
+}
+function fmtTimestamp(ts) {
+    if (!ts) return '-';
+    return new Date(ts).toLocaleString('ko-KR', {
+        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
 }
 function isoDaysAgo(days) {
     const d = new Date();

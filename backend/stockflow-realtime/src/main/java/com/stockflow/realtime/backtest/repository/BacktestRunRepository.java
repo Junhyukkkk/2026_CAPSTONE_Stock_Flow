@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stockflow.realtime.backtest.engine.Bar;
 import com.stockflow.realtime.backtest.engine.BacktestResult;
+import com.stockflow.realtime.prediction.PredictionSignalResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -36,13 +37,15 @@ public class BacktestRunRepository {
      * 백테스트 입력 일봉 로딩. symbol_daily_ohlcv 에 source 가 여러 개일 수 있으므로
      * 일자별로 가장 최근 계산본(computed_at DESC) 하나만 선택한다.
      */
-    public List<Bar> loadBars(String symbol, LocalDate from, LocalDate to) {
+    public List<Bar> loadBars(String symbol, String source, LocalDate from, LocalDate to) {
         return jdbcTemplate.query(
                 """
                 SELECT DISTINCT ON (trade_date)
                        trade_date, open, high, low, close, volume
                 FROM symbol_daily_ohlcv
-                WHERE symbol = ? AND trade_date BETWEEN ? AND ?
+                WHERE symbol = ?
+                  AND source = ?
+                  AND trade_date BETWEEN ? AND ?
                 ORDER BY trade_date ASC, computed_at DESC
                 """,
                 (rs, rowNum) -> new Bar(
@@ -52,7 +55,82 @@ public class BacktestRunRepository {
                         rs.getBigDecimal("low"),
                         rs.getBigDecimal("close"),
                         rs.getBigDecimal("volume")),
-                symbol.toUpperCase(), Date.valueOf(from), Date.valueOf(to));
+                symbol.toUpperCase(), source, Date.valueOf(from), Date.valueOf(to));
+    }
+
+    /** 시작일 이전에 실제로 저장된 일봉 관측치 수를 반환한다. */
+    public int countBarsBefore(String symbol, String source, LocalDate from) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(DISTINCT trade_date)
+                FROM symbol_daily_ohlcv
+                WHERE symbol = ?
+                  AND trade_date < ?
+                  AND (? IS NULL OR source = ?)
+                """,
+                Integer.class,
+                symbol.toUpperCase(), Date.valueOf(from), source, source);
+        return count == null ? 0 : count;
+    }
+
+    /** 심볼별 저장 일봉 범위와 실제 관측치 수를 반환한다. */
+    public DataCoverage findCoverage(String symbol, String source) {
+        return jdbcTemplate.query(
+                """
+                SELECT MIN(trade_date) AS first_date,
+                       MAX(trade_date) AS last_date,
+                       COUNT(DISTINCT trade_date) AS bar_count
+                FROM symbol_daily_ohlcv
+                WHERE symbol = ?
+                  AND source = ?
+                """,
+                rs -> {
+                    if (!rs.next() || rs.getDate("first_date") == null) {
+                        return new DataCoverage(null, null, 0);
+                    }
+                    return new DataCoverage(
+                            rs.getDate("first_date").toLocalDate(),
+                            rs.getDate("last_date").toLocalDate(),
+                            rs.getInt("bar_count"));
+                },
+                symbol.toUpperCase(), source);
+    }
+
+    /**
+     * 선택 구간이 연속된 일봉으로 채워져 있고 시작일 전 학습 일수가 충분한 암호화폐 심볼만 반환한다.
+     * 전체 성과 리포트는 이 목록만 대상으로 삼아 실행 실패와 불필요한 모델 호출을 줄인다.
+     */
+    public List<String> findEligibleCryptoSymbols(
+            String source, LocalDate from, LocalDate to, int minimumHistoryDays) {
+        int expectedBars = Math.toIntExact(java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1);
+        return jdbcTemplate.queryForList(
+                """
+                SELECT symbol
+                FROM symbol_daily_ohlcv
+                WHERE source = ?
+                  AND market_type = 'CRYPTO'
+                GROUP BY symbol
+                HAVING COUNT(DISTINCT trade_date)
+                           FILTER (WHERE trade_date BETWEEN ? AND ?) = ?
+                   AND COUNT(DISTINCT trade_date)
+                           FILTER (WHERE trade_date < ?) >= ?
+                ORDER BY symbol
+                """,
+                String.class,
+                source, Date.valueOf(from), Date.valueOf(to), expectedBars,
+                Date.valueOf(from), minimumHistoryDays);
+    }
+
+    public int countKnownCryptoSymbols(String source) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(DISTINCT symbol)
+                FROM symbol_daily_ohlcv
+                WHERE source = ?
+                  AND market_type = 'CRYPTO'
+                """,
+                Integer.class, source);
+        return count == null ? 0 : count;
     }
 
     /**
@@ -142,6 +220,31 @@ public class BacktestRunRepository {
                 });
     }
 
+    public void savePredictionPoints(
+            long runId, List<PredictionSignalResponse.PredictionSignalPoint> points) {
+        if (points == null || points.isEmpty()) {
+            return;
+        }
+        jdbcTemplate.batchUpdate(
+                """
+                INSERT INTO backtest_prediction_points
+                    (run_id, signal_date, execution_date, reference_price, predicted_price,
+                     expected_return_pct, threshold_pct, signal)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                points, points.size(),
+                (ps, point) -> {
+                    ps.setLong(1, runId);
+                    ps.setDate(2, Date.valueOf(point.signalDate()));
+                    ps.setDate(3, Date.valueOf(point.executionDate()));
+                    ps.setBigDecimal(4, point.referencePrice());
+                    ps.setBigDecimal(5, point.predictedPrice());
+                    ps.setBigDecimal(6, point.expectedReturnPct());
+                    ps.setBigDecimal(7, point.thresholdPct());
+                    ps.setString(8, point.signal());
+                });
+    }
+
     public Optional<RunRow> findRun(long id) {
         List<RunRow> rows = jdbcTemplate.query(
                 "SELECT * FROM backtest_runs WHERE id = ?", runRowMapper, id);
@@ -182,6 +285,26 @@ public class BacktestRunRepository {
                         rs.getDate("trade_date").toLocalDate(),
                         rs.getBigDecimal("equity"),
                         rs.getBigDecimal("drawdown_pct")),
+                runId);
+    }
+
+    public List<PredictionPointRow> findPredictionPoints(long runId) {
+        return jdbcTemplate.query(
+                """
+                SELECT signal_date, execution_date, reference_price, predicted_price,
+                       expected_return_pct, threshold_pct, signal
+                FROM backtest_prediction_points
+                WHERE run_id = ?
+                ORDER BY execution_date ASC
+                """,
+                (rs, rowNum) -> new PredictionPointRow(
+                        rs.getDate("signal_date").toLocalDate(),
+                        rs.getDate("execution_date").toLocalDate(),
+                        rs.getBigDecimal("reference_price"),
+                        rs.getBigDecimal("predicted_price"),
+                        rs.getBigDecimal("expected_return_pct"),
+                        rs.getBigDecimal("threshold_pct"),
+                        rs.getString("signal")),
                 runId);
     }
 
@@ -261,6 +384,24 @@ public class BacktestRunRepository {
             LocalDate tradeDate,
             BigDecimal equity,
             BigDecimal drawdownPct
+    ) {
+    }
+
+    public record DataCoverage(
+            LocalDate firstDate,
+            LocalDate lastDate,
+            int barCount
+    ) {
+    }
+
+    public record PredictionPointRow(
+            LocalDate signalDate,
+            LocalDate executionDate,
+            BigDecimal referencePrice,
+            BigDecimal predictedPrice,
+            BigDecimal expectedReturnPct,
+            BigDecimal thresholdPct,
+            String signal
     ) {
     }
 }

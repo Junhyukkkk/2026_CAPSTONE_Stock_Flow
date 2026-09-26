@@ -27,8 +27,10 @@ FROM eclipse-temurin:17-jre
 
 WORKDIR /app
 
-# Copy the built JAR
-COPY --from=build /app/stockflow-realtime/build/libs/*.jar app.jar
+# Copy only the executable Spring Boot JAR; Gradle also creates a plain JAR.
+COPY --from=build /app/stockflow-realtime/build/libs/stockflow-realtime-*.jar /app/
+RUN find /app -name '*-plain.jar' -delete && \
+    mv /app/stockflow-realtime-*.jar /app/app.jar
 
 # Expose the application port
 EXPOSE 8081

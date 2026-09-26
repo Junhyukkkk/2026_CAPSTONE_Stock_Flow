@@ -12,7 +12,10 @@ public enum StrategyType {
     MA_CROSSOVER,
 
     /** RSI 과매도 진입 매수, 과매수 진입 매도. */
-    RSI;
+    RSI,
+
+    /** FastAPI 워크포워드 예측을 BUY/HOLD/SELL 신호로 변환. */
+    PREDICTION;
 
     /**
      * 문자열을 StrategyType 으로 파싱한다(대소문자 무시).
@@ -27,7 +30,8 @@ public enum StrategyType {
             return StrategyType.valueOf(value.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(
-                    "Unknown strategyType: " + value + " (allowed: BUY_AND_HOLD, MA_CROSSOVER, RSI)");
+                    "Unknown strategyType: " + value
+                            + " (allowed: BUY_AND_HOLD, MA_CROSSOVER, RSI, PREDICTION)");
         }
     }
 }

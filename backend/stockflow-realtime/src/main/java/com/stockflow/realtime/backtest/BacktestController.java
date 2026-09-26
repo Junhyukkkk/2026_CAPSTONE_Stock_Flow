@@ -1,10 +1,22 @@
 package com.stockflow.realtime.backtest;
 
 import com.stockflow.realtime.backtest.dto.BacktestRunResponse;
+import com.stockflow.realtime.backtest.dto.BacktestDataReadinessResponse;
+import com.stockflow.realtime.backtest.dto.IntradayBacktestDataReadinessResponse;
+import com.stockflow.realtime.backtest.dto.IntradayBacktestResponse;
+import com.stockflow.realtime.backtest.dto.IntradayRunRequest;
 import com.stockflow.realtime.backtest.dto.EquityPointResponse;
+import com.stockflow.realtime.backtest.dto.PredictionPointResponse;
+import com.stockflow.realtime.backtest.dto.PerformanceReportRequest;
+import com.stockflow.realtime.backtest.dto.PerformanceReportResponse;
+import com.stockflow.realtime.backtest.dto.PerformanceReportUniverseResponse;
+import com.stockflow.realtime.backtest.dto.PerformanceReportJobRequest;
+import com.stockflow.realtime.backtest.dto.PerformanceReportJobResponse;
 import com.stockflow.realtime.backtest.dto.RunRequest;
 import com.stockflow.realtime.backtest.dto.StrategyRequest;
 import com.stockflow.realtime.backtest.dto.StrategyResponse;
+import com.stockflow.realtime.backtest.dto.ThresholdReportRequest;
+import com.stockflow.realtime.backtest.dto.ThresholdReportResponse;
 import com.stockflow.realtime.backtest.dto.TradeResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -16,6 +28,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.List;
 
 @RestController
@@ -26,6 +39,7 @@ public class BacktestController {
 
     private final BacktestStrategyService strategyService;
     private final BacktestRunService runService;
+    private final PerformanceReportJobService performanceReportJobService;
 
     // ----- 전략 CRUD -----
 
@@ -92,6 +106,84 @@ public class BacktestController {
         return ResponseEntity.ok(runService.runAdHoc(request));
     }
 
+    @GetMapping("/readiness")
+    @Operation(summary = "백테스트 데이터 준비 상태 조회",
+            description = "선택 기간의 실제 일봉 수, 시작일 이전 학습 데이터 수, 누락 여부를 실행 전에 조회합니다.")
+    public ResponseEntity<BacktestDataReadinessResponse> getDataReadiness(
+            @RequestParam String symbol,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "BINANCE") String source,
+            @RequestParam(defaultValue = "0") int minimumHistoryDays) {
+        return ResponseEntity.ok(
+                runService.inspectDataReadiness(symbol, from, to, source, minimumHistoryDays));
+    }
+
+    @GetMapping("/intraday-readiness")
+    @Operation(summary = "1분봉 백테스트 데이터 준비 상태 조회",
+            description = "TimescaleDB 1분 연속 집계 기준으로 선택 구간의 실제 분봉 수·누락·학습 이력을 확인합니다. 현재는 BTCUSDT 등의 1m 확장 준비용 API입니다.")
+    public ResponseEntity<IntradayBacktestDataReadinessResponse> getIntradayDataReadiness(
+            @RequestParam String symbol,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(defaultValue = "1m") String interval,
+            @RequestParam(defaultValue = "BINANCE") String source,
+            @RequestParam(defaultValue = "200") int minimumHistoryBars) {
+        return ResponseEntity.ok(runService.inspectIntradayDataReadiness(
+                symbol, from, to, interval, source, minimumHistoryBars));
+    }
+
+    @PostMapping("/intraday/run")
+    @Operation(summary = "BTCUSDT 1분봉 백테스트 실행",
+            description = "BUY_AND_HOLD 또는 MA_CROSSOVER를 1분봉 종가 신호·다음 1분봉 시가 체결 기준으로 실행합니다. 현재 BTCUSDT, 최대 6시간을 지원합니다.")
+    public ResponseEntity<IntradayBacktestResponse> runIntraday(@Valid @RequestBody IntradayRunRequest request) {
+        return ResponseEntity.ok(runService.runIntraday(request));
+    }
+
+    @PostMapping("/performance-report")
+    @Operation(summary = "종목별 예측 성능 리포트 생성",
+            description = "대표 암호화폐에 Buy & Hold와 세 예측 모델을 동일 조건으로 실행해 성과를 집계합니다.")
+    public ResponseEntity<PerformanceReportResponse> generatePerformanceReport(
+            @Valid @RequestBody PerformanceReportRequest request) {
+        return ResponseEntity.ok(runService.generatePerformanceReport(request));
+    }
+
+    @GetMapping("/performance-report/universe")
+    @Operation(summary = "전체 코인 성과 리포트 대상 조회",
+            description = "선택 기간의 연속 일봉과 시작일 전 학습 데이터 조건을 모두 충족하는 Binance 암호화폐를 반환합니다.")
+    public ResponseEntity<PerformanceReportUniverseResponse> getPerformanceReportUniverse(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "50") int minimumHistoryDays) {
+        return ResponseEntity.ok(
+                runService.inspectPerformanceReportUniverse(from, to, minimumHistoryDays));
+    }
+
+    @PostMapping("/performance-report/jobs")
+    @Operation(summary = "전체 암호화폐 성과 리포트 작업 시작",
+            description = "실행 가능한 모든 Binance 암호화폐를 백그라운드에서 순차 실행하고 진행 상태를 저장합니다.")
+    public ResponseEntity<PerformanceReportJobResponse> startPerformanceReportJob(
+            @Valid @RequestBody PerformanceReportJobRequest request) {
+        return ResponseEntity.accepted().body(performanceReportJobService.start(request));
+    }
+
+    @GetMapping("/performance-report/jobs/{jobId}")
+    @Operation(summary = "전체 암호화폐 성과 리포트 작업 조회",
+            description = "진행률, 완료된 종목별 결과, 완료 시 모델별 요약을 조회합니다.")
+    public ResponseEntity<PerformanceReportJobResponse> getPerformanceReportJob(@PathVariable long jobId) {
+        return performanceReportJobService.get(jobId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/performance-report/thresholds")
+    @Operation(summary = "신호 기준 계수 비교 리포트 생성",
+            description = "선택한 예측 모델에 0.15, 0.25, 0.35 기준 계수를 적용해 대표 암호화폐 성과를 비교합니다.")
+    public ResponseEntity<ThresholdReportResponse> generateThresholdReport(
+            @Valid @RequestBody ThresholdReportRequest request) {
+        return ResponseEntity.ok(runService.generateThresholdReport(request));
+    }
+
     @GetMapping("/strategies/{id}/runs")
     @Operation(summary = "전략별 실행 이력 조회")
     public List<BacktestRunResponse> listRunsByStrategy(@PathVariable long id) {
@@ -121,6 +213,15 @@ public class BacktestController {
     @Operation(summary = "자산 곡선 조회", description = "일자별 평가금액·낙폭(시각화용 데이터)을 조회합니다.")
     public ResponseEntity<List<EquityPointResponse>> getEquityCurve(@PathVariable long runId) {
         return runService.getEquityCurve(runId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/runs/{runId}/prediction-points")
+    @Operation(summary = "예측 분석 포인트 조회",
+            description = "예측 전략 실행의 날짜별 예측가, 기준가, 신호, 임계값을 조회합니다.")
+    public ResponseEntity<List<PredictionPointResponse>> getPredictionPoints(@PathVariable long runId) {
+        return runService.getPredictionPoints(runId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }

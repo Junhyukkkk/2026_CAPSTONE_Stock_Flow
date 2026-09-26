@@ -137,6 +137,16 @@ batch:
   scheduler:
     enabled: ${BATCH_SCHEDULER_ENABLED:true}
 
+# 백테스트 검증용 대표 암호화폐. 신규·비주력 심볼의 짧은 이력으로 경고가 묻히지 않게 관리한다.
+backtest:
+  readiness:
+    symbols: ${BACKTEST_READINESS_SYMBOLS:BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,ADAUSDT,BNBUSDT,DOGEUSDT,LTCUSDT,LINKUSDT,AVAXUSDT}
+
+analysis:
+  base-url: ${ANALYSIS_BASE_URL:http://localhost:8000}
+  connect-timeout-ms: ${ANALYSIS_CONNECT_TIMEOUT_MS:3000}
+  read-timeout-ms: ${ANALYSIS_READ_TIMEOUT_MS:120000}
+
 # Retry Policy 설정 (RetryPolicyConfig에서 참조)
 retry:
   mode: ${RETRY_MODE:sync}
