@@ -14,14 +14,17 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 분봉(인트라데이) OHLCV. market_ticks 원본 틱에서 요청 시점에 N분 단위로 집계한다.
+ * 분봉(인트라데이) OHLCV. 1분봉 저장소(ohlcv_1m)를 N분 단위로 묶어 반환한다.
+ *
+ * <p>ohlcv_1m 은 market-data-sync 가 1분마다 채우므로 실시간보다 2~3분 늦다. 그래서 구간 안의
+ * 마지막 저장 캔들 이후 몇 분만 원본 틱(market_ticks)에서 보충해 최근 봉이 비지 않게 한다.
  * time_bucket 등 TimescaleDB 전용 함수를 쓰지 않아 일반 PostgreSQL에서도 동작한다.
  */
 @Service
 @RequiredArgsConstructor
 public class IntradayOhlcvService {
 
-    /** 지원 봉 주기 → 버킷 길이(초). */
+    /** 지원 봉 주기 → 버킷 길이(초). 모두 1분의 배수여야 한다. */
     private static final Map<String, Integer> INTERVAL_SECONDS = Map.of(
             "1m", 60,
             "5m", 300,
@@ -29,9 +32,43 @@ public class IntradayOhlcvService {
             "1h", 3600
     );
 
-    /** raw 틱 풀스캔을 막기 위한 조회 구간 상한. */
+    /** 과도한 응답을 막기 위한 조회 구간 상한. */
     private static final Duration MAX_RANGE = Duration.ofDays(7);
     private static final Duration DEFAULT_RANGE = Duration.ofDays(1);
+
+    private static final String SQL = """
+            WITH last_candle AS (
+                SELECT coalesce(max(bucket) + interval '1 minute', CAST(? AS timestamptz)) AS cutoff
+                FROM ohlcv_1m
+                WHERE symbol = ? AND bucket >= ? AND bucket < ?
+            ), minutes AS (
+                SELECT bucket, open, high, low, close, volume, trade_count
+                FROM ohlcv_1m
+                WHERE symbol = ? AND bucket >= ? AND bucket < ?
+                UNION ALL
+                SELECT date_trunc('minute', t.ts)                AS bucket,
+                       (array_agg(t.price ORDER BY t.ts ASC))[1]  AS open,
+                       max(t.price)                               AS high,
+                       min(t.price)                               AS low,
+                       (array_agg(t.price ORDER BY t.ts DESC))[1] AS close,
+                       sum(t.volume)                              AS volume,
+                       count(*)                                   AS trade_count
+                FROM market_ticks t, last_candle l
+                WHERE t.symbol = ? AND t.ts >= l.cutoff AND t.ts < ?
+                GROUP BY 1
+            )
+            SELECT to_timestamp(floor(extract(epoch FROM bucket) / ?) * ?) AS bucket,
+                   (array_agg(open ORDER BY bucket ASC))[1]  AS open,
+                   max(high)                                  AS high,
+                   min(low)                                   AS low,
+                   (array_agg(close ORDER BY bucket DESC))[1] AS close,
+                   sum(volume)                                AS volume,
+                   -- 실시간(LIVE) 캔들은 체결 수를 모른다. 하나라도 모르면 0 대신 NULL 로 둔다.
+                   CASE WHEN count(trade_count) = count(*) THEN sum(trade_count) END AS tick_count
+            FROM minutes
+            GROUP BY 1
+            ORDER BY 1 ASC
+            """;
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -53,24 +90,10 @@ public class IntradayOhlcvService {
         }
 
         String upperSymbol = symbol.toUpperCase();
+        Timestamp startTs = Timestamp.from(start);
+        Timestamp endTs = Timestamp.from(end);
         return jdbcTemplate.query(
-                """
-                SELECT bucket,
-                       (array_agg(price ORDER BY ts ASC))[1]  AS open,
-                       max(price)                              AS high,
-                       min(price)                              AS low,
-                       (array_agg(price ORDER BY ts DESC))[1] AS close,
-                       sum(volume)                             AS volume,
-                       count(*)                                AS tick_count
-                FROM (
-                    SELECT to_timestamp(floor(extract(epoch FROM ts) / ?) * ?) AS bucket,
-                           price, volume, ts
-                    FROM market_ticks
-                    WHERE symbol = ? AND ts >= ? AND ts < ?
-                ) t
-                GROUP BY bucket
-                ORDER BY bucket ASC
-                """,
+                SQL,
                 (rs, rowNum) -> IntradayOhlcvResponse.builder()
                         .symbol(upperSymbol)
                         .time(rs.getTimestamp("bucket").toInstant())
@@ -79,10 +102,12 @@ public class IntradayOhlcvService {
                         .low(rs.getBigDecimal("low"))
                         .close(rs.getBigDecimal("close"))
                         .volume(rs.getBigDecimal("volume"))
-                        .tickCount(rs.getLong("tick_count"))
+                        .tickCount(rs.getObject("tick_count", Long.class))
                         .build(),
-                bucketSeconds, bucketSeconds, upperSymbol,
-                Timestamp.from(start), Timestamp.from(end)
+                startTs, upperSymbol, startTs, endTs,      // last_candle
+                upperSymbol, startTs, endTs,               // ohlcv_1m
+                upperSymbol, endTs,                        // market_ticks 보충
+                bucketSeconds, bucketSeconds
         );
     }
 }
