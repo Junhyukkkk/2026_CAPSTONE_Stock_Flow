@@ -17,20 +17,35 @@
 | 실시간 시세 화면 | http://114.71.51.41:8081/ui/live.html |
 | 저장 적재 현황 | http://114.71.51.41:8081/storage-overview.html |
 | Swagger | http://114.71.51.41:8081/swagger-ui/index.html |
-| Grafana (admin/admin) | http://114.71.51.41:3000 |
-| — 처리량·지연 | http://114.71.51.41:3000/d/stockflow-app |
-| — 적체·유실 경보 | http://114.71.51.41:3000/d/stockflow-consumer-lag |
-| — JVM | http://114.71.51.41:3000/d/stockflow-jvm |
-| — Kafka | http://114.71.51.41:3000/d/stockflow-kafka |
-| — Redis·HikariCP | http://114.71.51.41:3000/d/stockflow-data-infra |
-| — 로그(Loki) | http://114.71.51.41:3000/d/stockflow-logs |
-| Prometheus 경보 | http://114.71.51.41:9090/alerts |
-| Prometheus 타깃 | http://114.71.51.41:9090/targets |
-| Alertmanager | http://114.71.51.41:9093 |
-| Kafka UI | http://114.71.51.41:8989 |
-| RedisInsight | http://114.71.51.41:5540 |
-| cAdvisor | http://114.71.51.41:8088 |
-| 예측 API | http://114.71.51.41:8000 |
+| Grafana (admin/admin) | http://localhost:3000 |
+| — 처리량·지연 | http://localhost:3000/d/stockflow-app |
+| — 적체·유실 경보 | http://localhost:3000/d/stockflow-consumer-lag |
+| — JVM | http://localhost:3000/d/stockflow-jvm |
+| — Kafka | http://localhost:3000/d/stockflow-kafka |
+| — Redis·HikariCP | http://localhost:3000/d/stockflow-data-infra |
+| — 로그(Loki) | http://localhost:3000/d/stockflow-logs |
+| Prometheus 경보 | http://localhost:9090/alerts |
+| Prometheus 타깃 | http://localhost:9090/targets |
+| Alertmanager | http://localhost:9093 |
+| Kafka UI | http://localhost:8989 (`--profile kafka-ui` 로 켤 때만) |
+| RedisInsight | http://localhost:5540 |
+| cAdvisor | http://localhost:8088 |
+| 예측 API | http://localhost:8000 |
+
+### 관리 도구 접속 (SSH 터널)
+
+외부에는 서비스 화면(8081)만 열려 있다. Grafana · Prometheus · Kafka UI · RedisInsight · 예측 API 등은
+서버 내부(127.0.0.1)에서만 열리므로, 내 PC 에서 SSH 터널을 연 뒤 `localhost` 주소로 접속한다.
+
+```bash
+ssh -p 22000 -N -L 3000:localhost:3000 -L 9090:localhost:9090 -L 9093:localhost:9093 -L 5540:localhost:5540 -L 8000:localhost:8000 capstone01@114.71.51.41
+```
+
+터널을 연 터미널은 켜 둔다. Kafka UI 가 필요하면 서버에서 `docker compose --profile kafka-ui up -d kafka-ui`
+로 켜고 `-L 8989:localhost:8989` 를 추가한다. 다 쓰면 `docker compose stop kafka-ui`.
+
+> 2026-09-26: 인증 없이 외부에 공개돼 있던 Kafka UI 가 침입당해 채굴 프로그램이 돌았다.
+> 관리 도구를 다시 외부에 열지 말 것.
 
 ---
 
@@ -141,7 +156,7 @@ curl -s -XPOST localhost:9093/api/v2/alerts -H 'Content-Type: application/json' 
 | 증상 | 확인 |
 |---|---|
 | 화면에 시세 안 뜸 | `docker compose ps` → stockflow-realtime, redis, kafka 상태 / `docker logs stockflow-realtime` |
-| 적체 경보 왔다 | http://114.71.51.41:3000/d/stockflow-consumer-lag → 밀린 양·추세 / 수집량이 갑자기 늘었는지 |
-| Grafana 패널 비어있음 | http://114.71.51.41:9090/targets 에서 exporter DOWN 이면 `docker compose --profile metrics up -d` |
+| 적체 경보 왔다 | http://localhost:3000/d/stockflow-consumer-lag → 밀린 양·추세 / 수집량이 갑자기 늘었는지 |
+| Grafana 패널 비어있음 | http://localhost:9090/targets 에서 exporter DOWN 이면 `docker compose --profile metrics up -d` |
 | "화면 도달 시간" 음수 | 서버 시계 오차 (NTP 미동기, 관리자 권한 필요). 지표만 이상, 실제 처리는 정상 |
 | 전체 재시작 | `cd ~/capstone/backend/infra && docker compose restart` |

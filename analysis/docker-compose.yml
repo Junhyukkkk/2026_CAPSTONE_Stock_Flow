@@ -3,7 +3,7 @@ services:
     build: .
     container_name: stockflow-analysis
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"  # 외부 비공개 (Spring 은 도커 네트워크로 호출)
     environment:
       # infra_default 네트워크 내부의 TimescaleDB 컨테이너를 바라봄
       DB_HOST: timescaledb
