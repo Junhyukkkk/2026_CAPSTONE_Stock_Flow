@@ -1,0 +1,24 @@
+services:
+  market-data-sync:
+    build: .
+    container_name: stockflow-market-data-sync
+    environment:
+      # infra_default 네트워크 내부의 TimescaleDB 컨테이너를 바라봄
+      DB_HOST: timescaledb
+      DB_PORT: "5432"
+      DB_NAME: stockflow
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      LOG_LEVEL: INFO
+    # 운영 중인 수집·실시간 경로에 영향이 없도록 자원을 제한한다.
+    cpus: 1.0
+    mem_limit: 512m
+    networks:
+      - infra
+    restart: unless-stopped
+
+networks:
+  # backend/infra/docker-compose.yml 가 만든 네트워크에 합류
+  infra:
+    external: true
+    name: infra_default
