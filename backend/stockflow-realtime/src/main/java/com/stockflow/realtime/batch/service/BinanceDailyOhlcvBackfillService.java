@@ -155,9 +155,11 @@ public class BinanceDailyOhlcvBackfillService {
         jdbcTemplate.batchUpdate(
                 """
                 INSERT INTO symbol_daily_ohlcv
-                    (symbol, trade_date, market_type, source, open, high, low, close, volume, tick_count, computed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    (symbol, trade_date, market_type, source, open, high, low, close, volume, tick_count, computed_at,
+                     origin)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'EXCHANGE')
                 ON CONFLICT (symbol, trade_date, source) DO UPDATE SET
+                    origin = 'EXCHANGE',
                     market_type = EXCLUDED.market_type,
                     open = EXCLUDED.open,
                     high = EXCLUDED.high,
