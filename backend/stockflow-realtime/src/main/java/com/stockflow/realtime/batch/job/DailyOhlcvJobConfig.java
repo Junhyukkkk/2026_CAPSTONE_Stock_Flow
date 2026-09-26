@@ -149,6 +149,7 @@ public class DailyOhlcvJobConfig {
                     volume       = EXCLUDED.volume,
                     tick_count   = EXCLUDED.tick_count,
                     computed_at  = NOW()
+                WHERE symbol_daily_ohlcv.origin IS DISTINCT FROM 'EXCHANGE'
                 """;
 
         return new JdbcBatchItemWriterBuilder<DailyOhlcvItem>()
