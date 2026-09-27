@@ -70,7 +70,8 @@ public class IntradayOhlcvService {
                    (array_agg(close ORDER BY bucket DESC))[1] AS close,
                    sum(volume)                                AS volume,
                    -- 실시간(LIVE) 캔들은 체결 수를 모른다. 하나라도 모르면 0 대신 NULL 로 둔다.
-                   CASE WHEN count(trade_count) = count(*) THEN sum(trade_count) END AS tick_count
+                   -- sum(bigint) 는 numeric 이라 JDBC 가 Long 으로 바꾸지 못한다 → bigint 로 캐스팅.
+                   CASE WHEN count(trade_count) = count(*) THEN sum(trade_count)::bigint END AS tick_count
             FROM minutes
             GROUP BY 1
             ORDER BY 1 ASC
