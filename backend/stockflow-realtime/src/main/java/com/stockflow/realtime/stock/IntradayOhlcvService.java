@@ -16,8 +16,8 @@ import java.util.Map;
 /**
  * 분봉(인트라데이) OHLCV. 1분봉 저장소(ohlcv_1m)를 N분 단위로 묶어 반환한다.
  *
- * <p>ohlcv_1m 은 market-data-sync 가 1분마다 채우므로 실시간보다 2~3분 늦다. 그래서 구간 안의
- * 마지막 저장 캔들 이후 몇 분만 원본 틱(market_ticks)에서 보충해 최근 봉이 비지 않게 한다.
+ * <p>ohlcv_1m 은 market-data-sync 가 1분마다 채우므로 실시간보다 2~3분 늦다. 그래서 구간 끝 30분 안에서
+ * 마지막 저장 캔들 이후 분만 원본 틱(market_ticks)에서 보충해 최근 봉이 비지 않게 한다.
  * time_bucket 등 TimescaleDB 전용 함수를 쓰지 않아 일반 PostgreSQL에서도 동작한다.
  */
 @Service
@@ -35,6 +35,11 @@ public class IntradayOhlcvService {
     /** 과도한 응답을 막기 위한 조회 구간 상한. */
     private static final Duration MAX_RANGE = Duration.ofDays(7);
     private static final Duration DEFAULT_RANGE = Duration.ofDays(1);
+    /**
+     * 원본 틱 보충은 구간 끝에서 이만큼만 본다. ohlcv_1m 은 2~3분 늦을 뿐이고 과거 구간은 이미 채워져 있다.
+     * 운영 실측: 고정 하한이 없으면 25초 초과(타임아웃), 30분 하한이면 11ms.
+     */
+    private static final Duration TOP_UP_WINDOW = Duration.ofMinutes(30);
 
     private static final String SQL = """
             WITH last_candle AS (
@@ -54,7 +59,8 @@ public class IntradayOhlcvService {
                        sum(t.volume)                              AS volume,
                        count(*)                                   AS trade_count
                 FROM market_ticks t, last_candle l
-                WHERE t.symbol = ? AND t.ts >= l.cutoff AND t.ts < ?
+                -- 고정 하한(? = 보충 시작)이 있어야 청크 제외가 된다. cutoff 만 쓰면 원본 틱 전체(83GB)를 훑는다.
+                WHERE t.symbol = ? AND t.ts >= ? AND t.ts >= l.cutoff AND t.ts < ?
                 GROUP BY 1
             )
             SELECT to_timestamp(floor(extract(epoch FROM bucket) / ?) * ?) AS bucket,
@@ -92,6 +98,8 @@ public class IntradayOhlcvService {
         String upperSymbol = symbol.toUpperCase();
         Timestamp startTs = Timestamp.from(start);
         Timestamp endTs = Timestamp.from(end);
+        Instant topUpFrom = end.minus(TOP_UP_WINDOW);
+        Timestamp topUpFromTs = Timestamp.from(topUpFrom.isAfter(start) ? topUpFrom : start);
         return jdbcTemplate.query(
                 SQL,
                 (rs, rowNum) -> IntradayOhlcvResponse.builder()
@@ -106,7 +114,7 @@ public class IntradayOhlcvService {
                         .build(),
                 startTs, upperSymbol, startTs, endTs,      // last_candle
                 upperSymbol, startTs, endTs,               // ohlcv_1m
-                upperSymbol, endTs,                        // market_ticks 보충
+                upperSymbol, topUpFromTs, endTs,           // market_ticks 보충
                 bucketSeconds, bucketSeconds
         );
     }
