@@ -13,7 +13,7 @@ TimescaleDB (OHLCV) ──▶ [analysis] 전처리 → ARIMA 학습/예측 → R
 ```
 
 데이터 소스
-- `market_ticks_1m` (분봉, 연속 집계 뷰) — 기본값
+- `ohlcv_1m` (분봉, 실시간 집계 + 거래소 확정본) — 기본값
 - `symbol_daily_ohlcv` (일봉, 배치 집계 테이블)
 
 > 데이터 누적 기간이 짧을 때는 포인트 수가 많은 **분봉(1m)** 이 ARIMA 학습에 유리하다.

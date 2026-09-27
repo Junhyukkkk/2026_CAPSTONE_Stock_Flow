@@ -356,6 +356,28 @@ services:
       - kafka
     restart: unless-stopped
 
+  # ---- 캔들 동기화 · 거래소 백필 · 결측 복구 (market-data-sync/README.md) ----
+  # ohlcv_1m 스키마(V16)는 stockflow-realtime 의 Flyway 가 만든다. 스키마가 생기기 전의 실패는
+  # 작업마다 로그만 남기고 다음 주기에 다시 시도한다.
+  market-data-sync:
+    build:
+      context: ../../market-data-sync
+      dockerfile: Dockerfile
+    container_name: stockflow-market-data-sync
+    environment:
+      - DB_HOST=timescaledb
+      - DB_PORT=5432
+      - DB_NAME=stockflow
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=postgres
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    # 운영 중인 수집 · 실시간 경로에 영향이 없도록 자원을 제한한다.
+    cpus: 1.0
+    mem_limit: 512m
+    depends_on:
+      - timescaledb
+    restart: unless-stopped
+
   # ---- Sentry 호환 에러 트래킹 (GlitchTip) ----
   # 실행: docker compose --profile sentry up -d
   # 이후 http://localhost:8000 에서 계정/프로젝트 생성 → DSN 을 .env 의 SENTRY_DSN 에 넣고

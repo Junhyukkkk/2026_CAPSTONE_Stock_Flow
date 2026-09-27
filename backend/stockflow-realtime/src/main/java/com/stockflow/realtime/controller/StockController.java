@@ -100,7 +100,7 @@ public class StockController {
 
     @GetMapping("/{symbol}/intraday")
     @Operation(summary = "분봉 OHLCV 조회",
-            description = "원본 틱을 N분 단위로 집계한 분봉(1m/5m/15m/1h) 시가/고가/저가/종가/거래량을 조회합니다.")
+            description = "1분봉 저장소(ohlcv_1m)를 N분 단위로 묶은 분봉(1m/5m/15m/1h) 시가/고가/저가/종가/거래량을 조회합니다.")
     public List<IntradayOhlcvResponse> getIntraday(
             @PathVariable String symbol,
             @Parameter(description = "봉 주기 (1m, 5m, 15m, 1h)")

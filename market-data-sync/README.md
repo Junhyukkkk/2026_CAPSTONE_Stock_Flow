@@ -23,11 +23,12 @@
 
 ## 실행
 
-`backend/infra` 스택이 떠 있어 `infra_default` 네트워크와 V16 이 적용된 DB 가 있어야 한다.
+운영에서는 `backend/infra/docker-compose.yml` 의 `market-data-sync` 서비스로 뜬다(main 병합 시 자동 배포).
+아래 `docker compose` 명령은 모두 **`backend/infra` 에서** 실행한다. 스키마(V16)는 stockflow-realtime 의 Flyway 가 만든다.
 
 ```bash
-cd market-data-sync
-docker compose up -d --build
+cd backend/infra
+docker compose up -d --build market-data-sync
 ```
 
 과거 구간을 한 번에 채울 때(연속 집계에 남아 있는 구간):

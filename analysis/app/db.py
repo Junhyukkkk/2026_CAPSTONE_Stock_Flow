@@ -1,6 +1,6 @@
 """TimescaleDB에서 OHLCV 시계열을 읽어온다.
 
-- 분봉(1m): 연속 집계 뷰 ``market_ticks_1m`` 사용
+- 분봉(1m): 1분봉 저장소 ``ohlcv_1m`` 사용 (실시간 집계 + 거래소 확정본, market-data-sync 가 관리)
 - 일봉(1d): 배치 집계 테이블 ``symbol_daily_ohlcv`` 사용
 """
 from functools import lru_cache
@@ -13,7 +13,7 @@ from .config import settings
 _MINUTE_SQL = text(
     """
     SELECT bucket AS ts, open, high, low, close, volume
-    FROM market_ticks_1m
+    FROM ohlcv_1m
     WHERE symbol = :symbol
       AND (:source IS NULL OR source = :source)
     ORDER BY bucket DESC
@@ -35,7 +35,7 @@ _DAILY_SQL = text(
 _MINUTE_RANGE_SQL = text(
     """
     SELECT bucket AS ts, open, high, low, close, volume
-    FROM market_ticks_1m
+    FROM ohlcv_1m
     WHERE symbol = :symbol
       AND (:source IS NULL OR source = :source)
       AND bucket >= :from_time
