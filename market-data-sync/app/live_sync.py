@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 
 from .db import get_engine
+from .store import retry_on_deadlock
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ UPSERT_LIVE_SQL = text(
     SELECT symbol, source, bucket, open, high, low, close, volume, 'LIVE', now()
     FROM market_ticks_1m
     WHERE bucket >= :from_ts AND bucket < :to_ts
+    ORDER BY symbol, source, bucket  -- 결측 복구와 같은 순서로 잠가 교착 상태를 피한다
     ON CONFLICT (symbol, source, bucket) DO UPDATE
     SET open = EXCLUDED.open,
         high = EXCLUDED.high,
@@ -49,9 +51,10 @@ def sync_window(now: datetime, lookback_minutes: int, settle_minutes: int):
 
 def sync_range(from_ts: datetime, to_ts: datetime) -> int:
     """구간을 한 번에 동기화하고 삽입·갱신된 행 수를 반환한다."""
-    with get_engine().begin() as conn:
-        result = conn.execute(UPSERT_LIVE_SQL, {"from_ts": from_ts, "to_ts": to_ts})
-        return result.rowcount
+    def once():
+        with get_engine().begin() as conn:
+            return conn.execute(UPSERT_LIVE_SQL, {"from_ts": from_ts, "to_ts": to_ts}).rowcount
+    return retry_on_deadlock(once)
 
 
 def run_once(lookback_minutes: int, settle_minutes: int, now: datetime = None) -> int:
