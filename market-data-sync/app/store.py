@@ -4,20 +4,27 @@ EXCHANGE 캔들은 LIVE 를 덮어쓰고, 같은 EXCHANGE 도 최신 값으로 �
 """
 import io
 import logging
+import time
 from datetime import datetime, timezone
 
+from psycopg2.errors import DeadlockDetected
 from sqlalchemy import text
 
 from .db import get_engine
 
 log = logging.getLogger(__name__)
 
+# 거래소 아카이브 파일에 같은 분이 두 번 들어 있는 경우가 있어(예: VIRTUALUSDT 2026-07) 분당 한 행만 남긴다.
+# 행을 시각 순으로 넣어 실시간 동기화와 같은 순서로 잠그므로 교착 상태가 생기지 않는다.
 _MERGE_1M = """
     INSERT INTO ohlcv_1m (symbol, source, bucket, open, high, low, close, volume,
                           quote_volume, trade_count, origin, updated_at)
     SELECT symbol, source, bucket, open, high, low, close, volume, quote_volume, trade_count,
            'EXCHANGE', now()
-    FROM stage_1m
+    FROM (SELECT DISTINCT ON (symbol, source, bucket) *
+          FROM stage_1m
+          ORDER BY symbol, source, bucket, trade_count DESC NULLS LAST) s
+    ORDER BY symbol, source, bucket
     ON CONFLICT (symbol, source, bucket) DO UPDATE
     SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low, close = EXCLUDED.close,
         volume = EXCLUDED.volume, quote_volume = EXCLUDED.quote_volume,
@@ -35,7 +42,10 @@ _MERGE_1D = """
     SELECT symbol, (bucket AT TIME ZONE 'UTC')::date, %(market_type)s, source, open, high, low, close,
            volume, trade_count,
            now(), 'EXCHANGE'
-    FROM stage_1m
+    FROM (SELECT DISTINCT ON (symbol, source, bucket) *
+          FROM stage_1m
+          ORDER BY symbol, source, bucket, trade_count DESC NULLS LAST) s
+    ORDER BY symbol, source, bucket
     ON CONFLICT (symbol, trade_date, source) DO UPDATE
     SET open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low, close = EXCLUDED.close,
         volume = EXCLUDED.volume, tick_count = EXCLUDED.tick_count, computed_at = now(),
@@ -58,10 +68,31 @@ def _copy_stage(raw_conn, symbol: str, source: str, candles) -> None:
         cur.copy_expert("COPY stage_1m FROM STDIN", buf)
 
 
+def is_deadlock(error) -> bool:
+    """psycopg2 원본 예외든 SQLAlchemy 로 감싼 예외든 교착 상태인지 판별한다."""
+    return isinstance(error, DeadlockDetected) or isinstance(getattr(error, "orig", None), DeadlockDetected)
+
+
+def retry_on_deadlock(fn, attempts: int = 3, pause_seconds: float = 1.0):
+    """교착 상태로 롤백된 트랜잭션은 다시 시도하면 대개 성공한다."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if not is_deadlock(e) or attempt == attempts:
+                raise
+            log.warning("deadlock detected, retrying (%d/%d)", attempt, attempts - 1)
+            time.sleep(pause_seconds * attempt)
+
+
 def _merge(candles, symbol: str, source: str, sql: str, params=None) -> int:
-    """COPY 와 병합을 한 트랜잭션에서 수행하고 삽입·갱신된 행 수를 반환한다."""
     if not candles:
         return 0
+    return retry_on_deadlock(lambda: _merge_once(candles, symbol, source, sql, params))
+
+
+def _merge_once(candles, symbol: str, source: str, sql: str, params=None) -> int:
+    """COPY 와 병합을 한 트랜잭션에서 수행하고 삽입·갱신된 행 수를 반환한다."""
     raw = get_engine().raw_connection()
     try:
         _copy_stage(raw.driver_connection, symbol, source, candles)

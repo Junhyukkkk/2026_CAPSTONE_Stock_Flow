@@ -48,6 +48,14 @@ class StoreDbTest(unittest.TestCase):
         self.assertEqual(store.upsert_minutes(SYMBOL, "BINANCE", [candle(1, close="12")]), 1)
         self.assertEqual(self._row(1)[0], Decimal("12"))
 
+    def test_duplicate_minutes_in_one_archive_are_collapsed(self):
+        # 거래소 아카이브에 같은 분이 두 번 들어 있어도 한 번에 병합할 수 있어야 한다(VIRTUALUSDT 2026-07).
+        candles = [candle(0), candle(0), candle(1)]
+        self.assertEqual(store.upsert_minutes(SYMBOL, "BINANCE", candles), 2)
+        with get_engine().connect() as c:
+            n = c.execute(text("SELECT count(*) FROM ohlcv_1m WHERE symbol = :s"), {"s": SYMBOL}).scalar()
+        self.assertEqual(n, 2)
+
     def test_coverage_counts_missing_minutes(self):
         store.upsert_minutes(SYMBOL, "BINANCE", [candle(0), candle(1), candle(4)])
         first, last, count, missing = store.update_coverage(SYMBOL, "BINANCE", "1m")

@@ -81,9 +81,20 @@ class RepairDbTest(unittest.TestCase):
         self.assertEqual(self._count(FULL, "EXCHANGE"), 0)      # 빠진 게 없으면 요청하지 않는다
         self.assertEqual(self._count(DEAD), 359)                # 거래 중이 아니면 건드리지 않는다
 
+        # 한 번 채운 구간은 다시 요청하지 않는다(상장 전 구간도 매시간 다시 묻지 않는다).
         calls = []
         repair.repair_gaps(now=NOW, fetch=fake_fetch(calls, listed), trading=TRADING)
-        self.assertEqual([c[0] for c in calls], [NEW])          # 상장 전 구간만 계속 비어 있다
+        self.assertEqual(calls, [])
+
+    def test_next_run_fetches_only_after_last_exchange_minute(self):
+        self._live(GAPPY, WINDOW_FROM, WINDOW_TO, skip=[WINDOW_FROM + 10 * M])
+        repair.repair_gaps(now=NOW, fetch=fake_fetch([]), trading={GAPPY})
+        # 한 시간 뒤: 새 한 시간 분량이 LIVE 로 들어왔고 그중 한 분이 비어 있다.
+        self._live(GAPPY, WINDOW_TO, WINDOW_TO + 60 * M, skip=[WINDOW_TO + 10 * M])
+        calls = []
+        s = repair.repair_gaps(now=NOW + timedelta(hours=1), fetch=fake_fetch(calls), trading={GAPPY})
+        self.assertEqual(calls, [(GAPPY, "1m", WINDOW_TO, WINDOW_TO + 60 * M)])
+        self.assertEqual(s["missing_minutes"], 1)
 
     def test_hours_argument_widens_window(self):
         self._live(GAPPY, WINDOW_FROM - timedelta(hours=10), WINDOW_TO,

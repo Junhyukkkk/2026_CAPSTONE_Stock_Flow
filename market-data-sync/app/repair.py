@@ -22,22 +22,37 @@ log = logging.getLogger(__name__)
 SOURCE = "BINANCE"
 MINUTE = timedelta(minutes=1)
 
-# 종목별 창 안의 봉 수만 센다. 체결이 없는 분은 수집 집계에 봉이 없으므로(거래소는 거래량 0 봉을 준다)
-# 빈 분을 하나씩 찾아 따로 요청하면 호출이 폭증한다. 대신 빠진 게 있는 종목은 창 전체를 한 번에 받는다.
+# 체결이 없는 분은 수집 집계에 봉이 없으므로(거래소는 거래량 0 봉을 준다) 빈 분을 하나씩 찾아 요청하면
+# 호출이 폭증한다. 종목별로 봉 수만 세고, 모자라면 구간을 한 번에 받는다.
+# 거래소 공식본(EXCHANGE)은 거래소가 준 구간 전체를 빈틈없이 쓰므로, 그 마지막 분 이전은 이미 완전하다.
+# 그래서 검사 · 요청은 '마지막 EXCHANGE 분 다음'부터만 한다(매시간 같은 구간을 다시 받지 않도록).
 # 창 안에 데이터가 전혀 없는 종목(수집이 멈춘 경우)도 잡도록 대상은 '최근 하루 동안 보인 종목'이다.
-_PRESENT_SQL = text("""
-    SELECT symbol, count(*) FILTER (WHERE bucket >= :from_ts) AS present
-    FROM ohlcv_1m
-    WHERE source = :src AND bucket >= :seen_from AND bucket < :to_ts
-    GROUP BY symbol
+_PENDING_SQL = text("""
+    WITH seen AS (
+        SELECT symbol, max(bucket) FILTER (WHERE origin = 'EXCHANGE') AS exchange_until
+        FROM ohlcv_1m
+        WHERE source = :src AND bucket >= :seen_from AND bucket < :to_ts
+        GROUP BY symbol
+    ), pending AS (
+        SELECT symbol, greatest(CAST(:from_ts AS timestamptz),
+                                coalesce(exchange_until + interval '1 minute', CAST(:from_ts AS timestamptz)))
+                       AS start_at
+        FROM seen
+    )
+    SELECT p.symbol, p.start_at,
+           (SELECT count(*) FROM ohlcv_1m o
+             WHERE o.symbol = p.symbol AND o.source = :src
+               AND o.bucket >= p.start_at AND o.bucket < :to_ts) AS present
+    FROM pending p
 """)
 
 
-def count_present(from_ts: datetime, to_ts: datetime) -> dict:
+def pending_ranges(from_ts: datetime, to_ts: datetime) -> dict:
+    """종목 → (검사 시작 분, 그 이후 보유 봉 수)."""
     with get_engine().connect() as conn:
-        rows = conn.execute(_PRESENT_SQL, {"src": SOURCE, "from_ts": from_ts, "to_ts": to_ts,
+        rows = conn.execute(_PENDING_SQL, {"src": SOURCE, "from_ts": from_ts, "to_ts": to_ts,
                                            "seen_from": from_ts - timedelta(days=1)}).fetchall()
-    return {symbol: present for symbol, present in rows}
+    return {symbol: (start_at, present) for symbol, start_at, present in rows}
 
 
 def repair_gaps(now: datetime = None, fetch=None, trading=None, hours: int = None) -> dict:
@@ -45,22 +60,22 @@ def repair_gaps(now: datetime = None, fetch=None, trading=None, hours: int = Non
     now = now or datetime.now(timezone.utc)
     to_ts = now.replace(second=0, microsecond=0) - timedelta(minutes=settings.repair_settle_minutes)
     from_ts = to_ts - timedelta(hours=hours or settings.repair_lookback_hours)
-    expected = int((to_ts - from_ts) / MINUTE)
     started = time.monotonic()
-    present = count_present(from_ts, to_ts)
+    pending = pending_ranges(from_ts, to_ts)
     trading = trading if trading is not None else set(binance.usdt_symbols())
     summary = {"symbols_checked": 0, "symbols_with_gaps": 0, "missing_minutes": 0,
                "filled": 0, "unfillable": 0, "failed": []}
-    for symbol, have in sorted(present.items()):
+    for symbol, (start_at, have) in sorted(pending.items()):
         if symbol not in trading:  # 상장폐지·거래중지 종목은 채울 수 없다
             continue
         summary["symbols_checked"] += 1
+        expected = int((to_ts - start_at) / MINUTE)
         if have >= expected:
             continue
         summary["symbols_with_gaps"] += 1
         summary["missing_minutes"] += expected - have
         try:
-            candles = fetch(symbol, "1m", from_ts, to_ts)
+            candles = fetch(symbol, "1m", start_at, to_ts)
             summary["filled"] += store.upsert_minutes(symbol, SOURCE, candles)
             # 창 중간 상장 · 거래소 중단 구간은 거래소에도 봉이 없다.
             summary["unfillable"] += max(0, expected - len(candles))
