@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -118,6 +119,71 @@ def usdt_symbols() -> list:
     info = json.loads(_get(f"{REST}/exchangeInfo?permissions=SPOT", timeout=60))
     return sorted(s["symbol"] for s in info["symbols"]
                   if s["quoteAsset"] == "USDT" and s["status"] == "TRADING")
+
+
+LISTING = "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
+
+# 코인이 아닌 USDT 거래쌍: 레버리지 토큰, 스테이블코인, 법정화폐, 래핑 · 금 토큰
+# Binance 레버리지 토큰은 정해진 기초 자산에만 있었다. 접미사만 보면 JUPUSDT 같은 실제 코인까지 걸린다.
+_LEVERAGED = re.compile(
+    r"^(BTC|ETH|BNB|ADA|XRP|LINK|DOT|TRX|EOS|XTZ|LTC|SXP|FIL|YFI|SUSHI|UNI|XLM|BCH|AAVE|1INCH)"
+    r"(UP|DOWN)USDT$|^(ETH|BNB|EOS|XRP)?(BULL|BEAR)USDT$")
+NON_COIN = {"USDCUSDT", "FDUSDUSDT", "TUSDUSDT", "USDPUSDT", "DAIUSDT", "BUSDUSDT", "PAXUSDT",
+            "USDSUSDT", "USDSBUSDT", "SUSDUSDT", "USTUSDT", "USDEUSDT", "USD1USDT", "XUSDUSDT",
+            "RLUSDUSDT", "BFUSDUSDT", "AEURUSDT", "EURIUSDT", "EURUSDT", "GBPUSDT", "AUDUSDT",
+            "BRLUSDT", "TRYUSDT", "RUBUSDT", "UAHUSDT", "BIDRUSDT", "IDRTUSDT", "NGNUSDT",
+            "ZARUSDT", "ARSUSDT", "BKRWUSDT", "PAXGUSDT", "XAUTUSDT", "WBTCUSDT", "WBETHUSDT",
+            "BETHUSDT", "BNSOLUSDT"}
+
+
+def is_coin_pair(symbol: str) -> bool:
+    return (symbol.endswith("USDT") and symbol != "USDT" and symbol not in NON_COIN
+            and not _LEVERAGED.match(symbol))
+
+
+def _list_keys(prefix: str, delimiter: str = None) -> list:
+    """data.binance.vision(S3) 목록. delimiter 를 주면 하위 '폴더' 이름, 아니면 파일 키."""
+    items, marker = [], ""
+    while True:
+        url = f"{LISTING}?prefix={quote(prefix)}" + (f"&delimiter={delimiter}" if delimiter else "") \
+              + (f"&marker={quote(marker)}" if marker else "")
+        xml = _get(url, timeout=60).decode()
+        tag = "Prefix" if delimiter else "Key"
+        found = re.findall(rf"<{tag}>([^<]+)</{tag}>", xml)
+        found = [f for f in found if f != prefix]
+        items += found
+        if "<IsTruncated>true</IsTruncated>" not in xml or not found:
+            return items
+        marker = found[-1]
+
+
+def archive_usdt_pairs() -> list:
+    """아카이브에 있는 USDT 현물 거래쌍(상장폐지 종목 포함), 코인이 아닌 쌍은 제외."""
+    base = "data/spot/monthly/klines/"
+    names = [p[len(base):].strip("/") for p in _list_keys(base, delimiter="/")]
+    return sorted(s for s in names if is_coin_pair(s))
+
+
+def archive_daily_periods(symbol: str) -> list:
+    """일봉 아카이브 기간: 완료된 달은 월별 파일, 그 뒤(상장폐지 직전 달 등)는 일별 파일.
+
+    상장폐지 직전의 폭락 구간이 생존 편향에서 가장 중요하므로 마지막 부분 달을 놓치지 않는다.
+    """
+    s = symbol
+    monthly_prefix = f"data/spot/monthly/klines/{s}/1d/"
+    months = sorted(re.findall(rf"{re.escape(s)}-1d-(\d{{4}}-\d{{2}})\.zip$", k)[0]
+                    for k in _list_keys(monthly_prefix) if k.endswith(".zip"))
+    periods = list(months)
+    if months:
+        y, m = map(int, months[-1].split("-"))
+        tail = []
+        for _ in range(2):  # 마지막 월별 파일 다음 두 달의 일별 파일
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+            prefix = f"data/spot/daily/klines/{s}/1d/{s}-1d-{y:04d}-{m:02d}"
+            tail += sorted(re.findall(rf"{re.escape(s)}-1d-(\d{{4}}-\d{{2}}-\d{{2}})\.zip$", k)[0]
+                           for k in _list_keys(prefix) if k.endswith(".zip"))
+        periods += tail
+    return periods
 
 
 def month_periods(first: date, last: date) -> list:

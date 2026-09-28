@@ -73,6 +73,43 @@ def backfill_daily(symbols: list, since: date) -> dict:
     return summary
 
 
+def resolve_archive_symbols(value: str) -> list:
+    """DELISTED = 아카이브에는 있지만 지금은 거래되지 않는 코인. 그 밖에는 쉼표로 구분한 목록."""
+    if value.upper() == "DELISTED":
+        trading = set(binance.usdt_symbols())
+        return [s for s in binance.archive_usdt_pairs() if s not in trading]
+    return [s.strip().upper() for s in value.split(",") if s.strip()]
+
+
+def backfill_daily_archive(symbols: list) -> dict:
+    """아카이브 일봉 파일로 적재한다. REST 로는 받을 수 없는 상장폐지 종목용(생존 편향 보완)."""
+    summary = {"ok": 0, "failed": [], "rows": 0, "files": 0, "empty": []}
+    for i, symbol in enumerate(symbols, 1):
+        started = time.monotonic()
+        try:
+            candles = []
+            periods = binance.archive_daily_periods(symbol)
+            for period in periods:
+                got = binance.download_archive(symbol, "1d", period)
+                if got:
+                    candles += got
+                    summary["files"] += 1
+            if not candles:
+                summary["empty"].append(symbol)
+                continue
+            rows = store.upsert_daily(symbol, SOURCE, "CRYPTO", candles)
+            first, last, count, missing = store.update_coverage(symbol, SOURCE, "1d", note="delisted (archive)")
+            summary["ok"] += 1
+            summary["rows"] += rows
+            log.info("[%d/%d] daily-archive %s files=%d rows=%d range=%s..%s missing=%s took=%.1fs",
+                     i, len(symbols), symbol, len(periods), rows, first and first.date(),
+                     last and last.date(), missing, time.monotonic() - started)
+        except Exception as e:
+            summary["failed"].append(symbol)
+            log.exception("[%d/%d] daily-archive %s failed: %s", i, len(symbols), symbol, e)
+    return summary
+
+
 def _minute_periods(first_month: str, last_month: str = None) -> list:
     """완료된 달은 월별 파일, 이번 달은 1일~어제 일별 파일."""
     today = datetime.now(timezone.utc).date()
@@ -128,10 +165,18 @@ def main():
     m.add_argument("--symbols", required=True)
     m.add_argument("--from", dest="first_month", required=True, help="YYYY-MM")
     m.add_argument("--to", dest="last_month", help="YYYY-MM (생략 시 어제까지)")
+    a = sub.add_parser("daily-archive", help="아카이브 일봉(상장폐지 종목 포함)")
+    a.add_argument("--symbols", default="DELISTED")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
     started = time.monotonic()
+    if args.kind == "daily-archive":
+        symbols = resolve_archive_symbols(args.symbols)
+        log.info("daily-archive backfill: %d symbols", len(symbols))
+        summary = backfill_daily_archive(symbols)
+        log.info("backfill done in %.0fs: %s", time.monotonic() - started, summary)
+        return
     symbols = resolve_symbols(args.symbols)
     log.info("%s backfill: %d symbols", args.kind, len(symbols))
     if args.kind == "daily":
