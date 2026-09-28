@@ -14,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import backtest as bt
+from . import chronos
 from . import metrics
 from .data import load_panel
 from .features import HORIZON, build_dataset, coin_features
@@ -33,6 +34,7 @@ def main():
     p.add_argument("--top-n", type=int, default=100)
     p.add_argument("--k", type=int, default=10)
     p.add_argument("--models", default="LINEAR,LGBM")
+    p.add_argument("--chronos", default="tiny,small", help="빈 문자열이면 Chronos 제외")
     p.add_argument("--out", default="/out")
     a = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -54,14 +56,20 @@ def main():
         t = time.monotonic()
         scores[m] = walk_forward(ds, folds, m, "fwd_rank", FEATURES_A)
         log.info("A %s trained (%.0fs)", m, time.monotonic() - t)
+    for size in filter(None, a.chronos.split(",")):
+        t = time.monotonic()
+        scores[f"CHRONOS_{size.upper()}"] = chronos.coin_scores(close, universe, start, end, size)
+        log.info("A chronos-%s predicted (%.0fs)", size, time.monotonic() - t)
+    # 모든 전략은 5개 트랜치(서로 다른 날 매매)의 평균으로 평가한다(매매일 운 제거).
     vol20 = coin_features(panel)["vol_20"]
-    bench = bt.equal_weight_portfolio(universe, close, start, end)
+    bench = bt.tranched(lambda cs: bt.equal_weight_portfolio(universe, close, start, end, calendar_start=cs), start)
     results_a = {"EW_UNIVERSE (benchmark)": {"perf": metrics.perf(bench), "yearly": metrics.yearly_returns(bench)}}
-    exhv = bt.equal_weight_portfolio(universe, close, start, end, exclude_top_vol=0.1, vol=vol20)
+    exhv = bt.tranched(lambda cs: bt.equal_weight_portfolio(universe, close, start, end, exclude_top_vol=0.1,
+                                                            vol=vol20, calendar_start=cs), start)
     results_a["EW_EX_HIGHVOL"] = {"perf": metrics.perf(exhv), "yearly": metrics.yearly_returns(exhv),
                                   "vs_bench": metrics.sharpe_diff_ci(exhv, bench)}
     for name, s in scores.items():
-        port = bt.top_k_portfolio(s, close, k=a.k)
+        port = bt.tranched(lambda cs: bt.top_k_portfolio(s, close, k=a.k, calendar_start=cs), start)
         results_a[f"TOP{a.k}_{name}"] = {
             "ic": metrics.rank_ic(s, fwd.reindex(s.index), HORIZON),
             "perf": metrics.perf(port), "yearly": metrics.yearly_returns(port),
@@ -77,16 +85,20 @@ def main():
     signals = {name: rule(mkt_eval) for name, rule in RULES_B.items()}
     for m in ("LOGIT", "LGBM"):
         signals[f"MODEL_{m}"] = walk_forward_market(mkt, folds, m)
+    for size in filter(None, a.chronos.split(",")):
+        signals[f"MODEL_CHRONOS_{size.upper()}"] = chronos.market_signal(idx_level, start, end, size)
     results_b = {}
-    base = {asset: bt.timing_strategy(r, signals["ALWAYS_IN"]) for asset, r in
-            (("EW_INDEX", idx_ret), ("BTC", btc_ret))}
+    def timing(r, sig):
+        return bt.tranched(lambda cs: bt.timing_strategy(r, sig, calendar_start=cs), start)
+
+    base = {asset: timing(r, signals["ALWAYS_IN"]) for asset, r in (("EW_INDEX", idx_ret), ("BTC", btc_ret))}
     for name, sig in signals.items():
         hit = None
         if name.startswith("MODEL_"):
             j = pd.DataFrame({"p": sig, "up": mkt["up"]}).dropna()
             hit = float(((j["p"] > 0.5) == (j["up"] > 0.5)).mean() * 100)
         for asset, r in (("EW_INDEX", idx_ret), ("BTC", btc_ret)):
-            strat = bt.timing_strategy(r, sig)
+            strat = timing(r, sig)
             exposure = float((sig > 0.5).mean() * 100)
             results_b[f"{asset}:{name}"] = {"perf": metrics.perf(strat), "yearly": metrics.yearly_returns(strat),
                                             "exposure_pct": exposure, "hit_pct": hit,

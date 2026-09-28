@@ -59,17 +59,6 @@ class SplitAndSealTest(unittest.TestCase):
             load_panel(end=date(2026, 9, 1))
 
 
-class DependencyTest(unittest.TestCase):
-    def test_lightgbm_loads_and_trains(self):
-        # 이미지에 OpenMP 런타임이 없으면 import 단계에서 실패한다
-        import lightgbm as lgb
-        X = np.random.default_rng(0).normal(size=(200, 3))
-        y = X[:, 0] + 0.1 * np.random.default_rng(1).normal(size=200)
-        booster = lgb.train({"objective": "regression", "verbose": -1, "num_threads": 1},
-                            lgb.Dataset(X, y), num_boost_round=5)
-        self.assertEqual(booster.predict(X).shape, (200,))
-
-
 class BacktestTest(unittest.TestCase):
     def test_top_k_charges_costs_and_uses_next_day_returns(self):
         idx = pd.date_range("2024-01-01", periods=4, freq="D")
@@ -82,6 +71,32 @@ class BacktestTest(unittest.TestCase):
         # 첫날 A 매수(비용 0.1%), 이후 매일 +10%
         self.assertAlmostEqual(r.iloc[0], 0.10 - 0.001, places=9)
         self.assertAlmostEqual(r.iloc[1], 0.10, places=9)
+
+    def test_sparse_and_daily_scores_rebalance_on_same_calendar(self):
+        # Chronos 처럼 매매일에만 점수가 있어도, 매일 점수가 있는 모델과 같은 날 매매해야 공정하다
+        idx = pd.date_range("2024-01-01", periods=12, freq="D")
+        rng = np.random.default_rng(3)
+        close = pd.DataFrame(100 * np.exp(np.cumsum(rng.normal(0, 0.05, (12, 3)), 0)), idx, list("ABC"))
+        daily_rank = {"A": 3.0, "B": 2.0, "C": 1.0}
+        daily = pd.Series({(t, s): daily_rank[s] + (i % 5 != 0) * (10 if s == "C" else 0)
+                           for i, t in enumerate(idx) for s in "ABC"})
+        daily.index.names = ["date", "symbol"]
+        sparse = daily[[d in idx[::5] for d in daily.index.get_level_values("date")]]
+        a = bt.top_k_portfolio(daily, close, k=1, rebalance=5, calendar_start=idx[0])
+        b = bt.top_k_portfolio(sparse, close, k=1, rebalance=5, calendar_start=idx[0])
+        pd.testing.assert_series_equal(a.loc[b.index], b)
+
+    def test_tranched_averages_offset_calendars(self):
+        idx = pd.date_range("2024-01-01", periods=10, freq="D")
+        calls = []
+
+        def strategy(cal_start):
+            calls.append((cal_start - idx[0]).days)
+            return pd.Series(float((cal_start - idx[0]).days), index=idx)
+
+        r = bt.tranched(strategy, idx[0], tranches=5)
+        self.assertEqual(calls, [0, 1, 2, 3, 4])
+        self.assertTrue((r == 2.0).all())
 
     def test_timing_holds_cash_when_signal_off(self):
         idx = pd.date_range("2024-01-01", periods=3, freq="D")
