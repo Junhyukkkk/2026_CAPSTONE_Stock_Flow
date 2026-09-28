@@ -66,8 +66,20 @@ prom_sum() { awk '$0 !~ /^#/ { v=$NF; if (v+0==v) s+=v } END { printf "%.0f", s 
 # 옛 버전 앱(3월)은 Kafka 컨슈머 지표(kafka_consumer_fetch_manager_*)를 노출하지 않는다.
 # 그런 경우 kafka-consumer-groups CLI 로 대체한다: CURRENT-OFFSET 합 = 소비 누적,
 # LAG 합 = 적체. 시작 시 지표 유무를 한 번 확인해 USE_CLI 를 정한다.
-cg_describe() { docker exec "$KAFKA_C" kafka-consumer-groups --bootstrap-server "$KAFKA_BOOTSTRAP" --group "$1-group" --describe 2>/dev/null; }
+# 고부하에서 docker exec 자체가 몇 초씩 멎는 경우가 있어(호스트 CPU 과부하), 한 번 실패로
+# 끝내지 않고 짧게 재시도한다. 그래도 실패하면 빈 문자열을 반환한다(호출부가 "모름"으로
+# 취급하도록 — 0으로 착각하면 A/B 델타가 음수로 튀는 원인이 된다, 9/21 v2 관측).
+cg_describe() {  # $1=realtime|storage
+  local out=""
+  for _ in 1 2 3; do
+    out=$(timeout 20 docker exec "$KAFKA_C" kafka-consumer-groups --bootstrap-server "$KAFKA_BOOTSTRAP" --group "$1-group" --describe 2>/dev/null || true)
+    echo "$out" | grep -q "$TOPIC" && break
+    out=""; sleep 2
+  done
+  printf '%s' "$out"
+}
 cg_sum() {  # $1=describe 출력, $2=consumed_total|lag
+  [ -z "$1" ] && return 0   # cg_describe 완전 실패(빈 응답) → 빈 문자열 반환("모름"), 0 아님
   echo "$1" | awk -v t="$TOPIC" -v k="$2" '$2==t { if (k=="lag" && $6 ~ /^[0-9]+$/) s+=$6; if (k=="consumed_total" && $4 ~ /^[0-9]+$/) s+=$4 } END { print s+0 }'
 }
 USE_CLI=0   # 앱 기동 확인 후(wait_health 다음) 지표 유무로 결정
@@ -208,8 +220,18 @@ for RATE in $RATES; do
   b_rt=$(consumed_total realtime "$OUT/${RATE}_B.prom")
   b_st=$(consumed_total storage "$OUT/${RATE}_B.prom")
   dt=$((b_epoch - a_epoch)); [ "$dt" -lt 1 ] && dt=1
-  crt=$(awk "BEGIN{printf \"%.0f\",($b_rt-$a_rt)/$dt}")
-  cst=$(awk "BEGIN{printf \"%.0f\",($b_st-$a_st)/$dt}")
+  # a_rt/b_rt 등이 브로커 CLI 재시도까지 실패해 빈 값이면, 0으로 착각해 델타를 내지 않고
+  # NA로 명시한다 (9/21 v2 에서 이 경로가 음수 소비율을 만든 원인).
+  if [ -n "$a_rt" ] && [ -n "$b_rt" ]; then
+    crt=$(awk "BEGIN{printf \"%.0f\",($b_rt-$a_rt)/$dt}")
+  else
+    crt="NA"; log "!! realtime 소비율 측정 실패(브로커 CLI 무응답) — 이 rate 는 NA"
+  fi
+  if [ -n "$a_st" ] && [ -n "$b_st" ]; then
+    cst=$(awk "BEGIN{printf \"%.0f\",($b_st-$a_st)/$dt}")
+  else
+    cst="NA"; log "!! storage 소비율 측정 실패(브로커 CLI 무응답) — 이 rate 는 NA"
+  fi
 
   log "lag 배수 대기 (상한 ${DRAIN_WAIT}s)"
   ds=$(date +%s); drained=timeout

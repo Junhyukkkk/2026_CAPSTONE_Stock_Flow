@@ -117,6 +117,10 @@ for spec in "$@"; do
   for c in $PAUSE_DURING_BUILD; do docker start "$c" >/dev/null 2>&1 || true; done
 
   # 2. 앱 컨테이너 교체 (처음엔 원래 컨테이너를 BACKUP 이름으로 보관)
+  # binance-collector 를 여기서부터 restore() 까지 계속 멈춰둔다 — 안 그러면 컨테이너
+  # 교체·기동 대기(최대 300s+20s) 동안 실제 시세가 topic 에 계속 쌓여, reset_offsets 로
+  # 방금 0 으로 맞춘 lag 위에 진짜 트래픽이 새로 얹혀서 그 시점의 첫 rate 구간이 오염된다.
+  docker stop stockflow-binance-collector >/dev/null 2>&1 || true
   if docker ps -a --format '{{.Names}}' | grep -qx "$BACKUP"; then
     docker stop "$LIVE" >/dev/null 2>&1 || true; docker rm "$LIVE" >/dev/null 2>&1 || true
   else
