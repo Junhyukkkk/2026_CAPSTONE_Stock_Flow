@@ -2,7 +2,7 @@ import unittest
 from datetime import date, datetime, timezone
 
 from app.backfill import _minute_periods
-from app.binance import archive_url, month_periods, parse_csv, to_datetime
+from app.binance import archive_url, is_coin_pair, month_periods, parse_csv, to_datetime
 
 # 실제 아카이브 형식: 2025 이전은 밀리초, 이후는 마이크로초
 MS_ROW = ("1640995200000,46216.93,46271.08,46208.37,46250.00,40.57574,1640995259999,"
@@ -35,6 +35,13 @@ class BinanceParsingTest(unittest.TestCase):
         url = archive_url("币安人生USDT", "1m", "2026-09")
         url.encode("ascii")  # urllib 은 ASCII URL 만 받는다
         self.assertIn("%E5%B8%81", url)
+
+    def test_coin_pair_filter_excludes_leveraged_stable_and_fiat(self):
+        for s in ["BTCUSDT", "LUNAUSDT", "FTTUSDT", "SUPERUSDT", "JUPUSDT", "SYRUPUSDT"]:
+            self.assertTrue(is_coin_pair(s), s)
+        for s in ["BTCUPUSDT", "ETHDOWNUSDT", "BULLUSDT", "EOSBEARUSDT", "USDCUSDT", "EURUSDT",
+                  "PAXGUSDT", "BTCBUSD"]:
+            self.assertFalse(is_coin_pair(s), s)
 
     def test_month_periods_cross_year(self):
         self.assertEqual(month_periods(date(2021, 11, 15), date(2022, 2, 1)),
