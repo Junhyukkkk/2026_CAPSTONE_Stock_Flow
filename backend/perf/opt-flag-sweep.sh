@@ -104,11 +104,14 @@ run_one() {  # $1=런이름  $2=env파일
 log "════════ baseline (현재 env 그대로) ════════"
 run_one baseline "$OUT/base.env"
 
-for FLAG in "$@"; do
-  name="off_${FLAG#STOCKFLOW_OPT_}"
+for spec in "$@"; do
+  # 기본은 false 로 끈다. "FLAG=true" 처럼 값을 지정하면 그 값으로 켠다 — baseline 에서
+  # 이미 false 인 플래그(예: STORAGE_IDEMPOTENCY_PIPELINE)를 반대로 켜서 재는 용도.
+  if [[ "$spec" == *=* ]]; then FLAG=${spec%%=*}; VAL=${spec#*=}; else FLAG=$spec; VAL=false; fi
+  name="${VAL}_${FLAG#STOCKFLOW_OPT_}"
   grep -v "^${FLAG}=" "$OUT/base.env" > "$OUT/$name.env" || true
-  echo "${FLAG}=false" >> "$OUT/$name.env"
-  log "════════ $FLAG=false ════════"
+  echo "${FLAG}=${VAL}" >> "$OUT/$name.env"
+  log "════════ $FLAG=$VAL ════════"
   run_one "$name" "$OUT/$name.env"
 done
 
