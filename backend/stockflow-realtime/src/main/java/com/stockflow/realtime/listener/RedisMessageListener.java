@@ -10,6 +10,7 @@ import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Redis Pub/Sub 메시지 리스너
@@ -43,11 +45,17 @@ public class RedisMessageListener implements MessageListener {
     private final DistributionSummary e2eAtWebsocket;
     private final Set<String> dispatchThreads = ConcurrentHashMap.newKeySet();
 
+    // N 이면 N번째 메시지마다 1번만 E2E 를 측정한다 (1 이하 = 매번, 기존 동작)
+    private final long e2eSampleEvery;
+    private final AtomicLong e2eSampleCounter = new AtomicLong();
+
     public RedisMessageListener(
             SimpMessagingTemplate messagingTemplate,
             PipelineStageMetrics stageMetrics,
             ObjectMapper objectMapper,
-            MeterRegistry registry) {
+            MeterRegistry registry,
+            @Value("${stockflow.e2e.sample-every:1}") long e2eSampleEvery) {
+        this.e2eSampleEvery = e2eSampleEvery;
         this.messagingTemplate = messagingTemplate;
         this.stageMetrics = stageMetrics;
         this.objectMapper = objectMapper;
@@ -85,13 +93,20 @@ public class RedisMessageListener implements MessageListener {
             stageMetrics.record(Stage.WS_DISPATCH, dispatchStart);
 
             // 송출 완료 후 계측 (측정 비용이 ws.dispatch에 섞이지 않도록 밖에서 수행)
-            recordE2ELatency(body);
+            if (shouldSampleE2E()) {
+                recordE2ELatency(body);
+            }
 
             log.trace("Forwarded to WebSocket: channel={}, destination={}", channel, destination);
 
         } catch (Exception e) {
             log.error("Failed to process Redis message", e);
         }
+    }
+
+    private boolean shouldSampleE2E() {
+        // 균등 추출이라 샘플링해도 지연 분포(p50~p99)는 유지된다 (count 만 1/N)
+        return e2eSampleEvery <= 1 || e2eSampleCounter.incrementAndGet() % e2eSampleEvery == 0;
     }
 
     private void recordE2ELatency(String body) {
