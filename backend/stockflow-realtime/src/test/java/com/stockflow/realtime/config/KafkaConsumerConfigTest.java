@@ -112,4 +112,22 @@ class KafkaConsumerConfigTest {
             }
         });
     }
+
+    @Test
+    void realtimeBatchFactoryIsBatchManualAckOnRealtimeConsumerFactory() {
+        runner.run(ctx -> {
+            ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> batch =
+                ctx.getBean("realtimeBatchKafkaListenerContainerFactory", ConcurrentKafkaListenerContainerFactory.class);
+            ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> single =
+                ctx.getBean("kafkaListenerContainerFactory", ConcurrentKafkaListenerContainerFactory.class);
+
+            assertThat(batch.getConsumerFactory()).isSameAs(ctx.getBean("consumerFactory"));
+            assertThat(ReflectionTestUtils.getField(batch, "batchListener")).isEqualTo(true);
+            assertThat(batch.getContainerProperties().getAckMode())
+                .isEqualTo(org.springframework.kafka.listener.ContainerProperties.AckMode.MANUAL);
+
+            // 기존 단건 팩토리는 배치 모드가 아니다 (건드리지 않았다)
+            assertThat(ReflectionTestUtils.getField(single, "batchListener")).isNotEqualTo(true);
+        });
+    }
 }

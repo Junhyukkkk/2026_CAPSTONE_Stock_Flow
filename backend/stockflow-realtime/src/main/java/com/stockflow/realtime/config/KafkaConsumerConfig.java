@@ -175,6 +175,27 @@ public class KafkaConsumerConfig {
     }
 
     /**
+     * Kafka Listener Container Factory (실시간 배치 소비용)
+     *
+     * RealtimeBatchConsumer(STOCKFLOW_OPT_REALTIME_BATCH=true)에서 사용.
+     * 단건 팩토리와 같은 consumerFactory 를 쓰되 배치 리스너 모드 + 수동 커밋.
+     * 컨테이너는 리스너가 등록될 때만 만들어지므로 플래그가 꺼져 있으면 아무 것도 시작하지 않는다.
+     */
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> realtimeBatchKafkaListenerContainerFactory(
+            @Qualifier("consumerFactory") ConsumerFactory<String, NormalizedTradeDTO> consumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> factory =
+            new ConcurrentKafkaListenerContainerFactory<>();
+
+        factory.setConsumerFactory(consumerFactory);
+        factory.setBatchListener(true);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL);
+        factory.setConcurrency(concurrency);
+
+        return factory;
+    }
+
+    /**
      * Kafka Listener Container Factory (배치 처리용)
      *
      * StorageConsumer에서 사용

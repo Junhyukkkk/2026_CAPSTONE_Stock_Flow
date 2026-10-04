@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -70,12 +71,36 @@ public class RedisPriceService {
      */
     public void processRealtimeTrade(NormalizedTradeDTO trade) {
         // Price validation
-        if (trade.getPrice() == null || trade.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Invalid price: " + trade.getPrice());
-        }
+        validatePrice(trade);
 
         long totalStart = stageMetrics.start();
 
+        String symbol = trade.getSymbol();
+
+        PriceSnapshot snapshot = buildSnapshot(trade);
+
+        // 4. Redis 캐싱 + Pub/Sub 발행
+        if (opt.isRedisPipeline()) {
+            saveAndPublish(symbol, snapshot);
+        } else {
+            saveLatestPrice(symbol, snapshot);
+            publishPriceUpdate(symbol, snapshot);
+        }
+
+        stageMetrics.record(Stage.REALTIME_TOTAL, totalStart);
+
+        log.debug("Processed realtime trade: symbol={}, price={}, change={}, changePercent={}%",
+                symbol, snapshot.getPrice(), snapshot.getChange(), snapshot.getChangePercent());
+    }
+
+    private static void validatePrice(NormalizedTradeDTO trade) {
+        if (trade.getPrice() == null || trade.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Invalid price: " + trade.getPrice());
+        }
+    }
+
+    /** 전일 종가 조회 → 등락률 계산 → PriceSnapshot 생성 (단건/배치 경로 공용) */
+    private PriceSnapshot buildSnapshot(NormalizedTradeDTO trade) {
         String symbol = trade.getSymbol();
         BigDecimal currentPrice = trade.getPrice();
 
@@ -94,7 +119,7 @@ public class RedisPriceService {
         }
 
         // 3. PriceSnapshot 생성
-        PriceSnapshot snapshot = PriceSnapshot.builder()
+        return PriceSnapshot.builder()
                 .symbol(symbol)
                 .price(currentPrice)
                 .volume(trade.getVolume())
@@ -104,19 +129,68 @@ public class RedisPriceService {
                 .changePercent(changePercent)
                 .marketType(trade.getMarketType())
                 .build();
+    }
 
-        // 4. Redis 캐싱 + Pub/Sub 발행
-        if (opt.isRedisPipeline()) {
-            saveAndPublish(symbol, snapshot);
-        } else {
-            saveLatestPrice(symbol, snapshot);
-            publishPriceUpdate(symbol, snapshot);
+    /**
+     * poll 단위 배치 처리 (STOCKFLOW_OPT_REALTIME_BATCH)
+     *
+     * 심볼당 최신 1건(timestamp 최대, 동률이면 배치 내 마지막)만 골라 전일 종가·등락률을 계산하고
+     * 최신가 SET + Pub/Sub PUBLISH 를 파이프라인 1회 왕복으로 묶는다. 중간 틱은 건너뛴다.
+     *
+     * 배치 안에 유효하지 않은 가격이 하나라도 있으면 아무 것도 쓰지 않고 IllegalArgumentException 을 던진다 —
+     * 호출자가 단건 경로로 폴백해 그 레코드가 기존과 같이 재시도/DLQ 로 처리되도록 하기 위함이다.
+     */
+    public void processRealtimeTradeBatch(List<NormalizedTradeDTO> trades) {
+        Map<String, NormalizedTradeDTO> latestBySymbol = new LinkedHashMap<>();
+        for (NormalizedTradeDTO trade : trades) {
+            validatePrice(trade);
+            latestBySymbol.merge(trade.getSymbol(), trade,
+                    (prev, cur) -> timestampOf(cur) >= timestampOf(prev) ? cur : prev);
         }
+        if (latestBySymbol.isEmpty()) {
+            return;
+        }
+
+        long totalStart = stageMetrics.start();
+
+        List<byte[][]> entries = new ArrayList<>(latestBySymbol.size());
+        try {
+            for (NormalizedTradeDTO trade : latestBySymbol.values()) {
+                PriceSnapshot snapshot = buildSnapshot(trade);
+
+                long serializeStart = stageMetrics.start();
+                String payload = objectMapper.writeValueAsString(snapshot);
+                stageMetrics.record(Stage.SNAPSHOT_SERIALIZE, serializeStart);
+
+                entries.add(new byte[][]{
+                        PriceKeys.latestPrice(trade.getSymbol()).getBytes(StandardCharsets.UTF_8),
+                        PriceKeys.priceChannel(trade.getSymbol()).getBytes(StandardCharsets.UTF_8),
+                        payload.getBytes(StandardCharsets.UTF_8)});
+            }
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to cache latest price", e);
+        }
+
+        long pipelineStart = stageMetrics.start();
+        redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+            for (byte[][] entry : entries) {
+                connection.stringCommands().set(
+                        entry[0], entry[2],
+                        Expiration.from(PriceKeys.LATEST_PRICE_TTL),
+                        RedisStringCommands.SetOption.upsert());
+                connection.publish(entry[1], entry[2]);
+            }
+            return null;
+        });
+        stageMetrics.record(Stage.REDIS_SET_PUBLISH_PIPELINED, pipelineStart);
 
         stageMetrics.record(Stage.REALTIME_TOTAL, totalStart);
 
-        log.debug("Processed realtime trade: symbol={}, price={}, change={}, changePercent={}%",
-                symbol, currentPrice, change, changePercent);
+        log.debug("Processed realtime trade batch: received={}, symbols={}", trades.size(), entries.size());
+    }
+
+    private static long timestampOf(NormalizedTradeDTO trade) {
+        return trade.getTimestamp() == null ? Long.MIN_VALUE : trade.getTimestamp();
     }
 
     /**
