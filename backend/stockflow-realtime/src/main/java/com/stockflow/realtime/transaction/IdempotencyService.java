@@ -4,6 +4,7 @@ import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.realtime.config.OptimizationProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.connection.RedisStringCommands;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -23,10 +24,18 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class IdempotencyService {
 
-    private static final long DEFAULT_TTL_SECONDS = 86400; // 24시간
+    /** 기본 TTL(24시간). env STOCKFLOW_IDEMPOTENCY_TTL_SECONDS 로 override. */
+    static final long DEFAULT_TTL_SECONDS = 86400;
 
     private final RedisTemplate<String, String> redisTemplate;
     private final OptimizationProperties opt;
+
+    /**
+     * 멱등 키 TTL(초). Redis 가 allkeys-lru 로 가득 차 있으면 키가 축출되므로 줄여 메모리 압박을 낮출 수 있다.
+     * DB 에 ON CONFLICT DO NOTHING 이 있어 이 키는 재전달 시 절약용일 뿐이다.
+     */
+    @Value("${stockflow.idempotency.ttl-seconds:86400}")
+    private long ttlSeconds = DEFAULT_TTL_SECONDS;
 
     /**
      * DB 유니크 키 (symbol, source, trade_id, ts) 와 동일 축 — trade_ts는 epoch ms.
@@ -54,7 +63,7 @@ public class IdempotencyService {
     }
 
     public void markAsProcessed(String channel, NormalizedTradeDTO trade) {
-        markAsProcessed(channel, trade, DEFAULT_TTL_SECONDS);
+        markAsProcessed(channel, trade, ttlSeconds);
     }
 
     /**
@@ -103,7 +112,7 @@ public class IdempotencyService {
         }
 
         if (opt.isStorageIdempotencyPipeline()) {
-            Expiration ttl = Expiration.seconds(DEFAULT_TTL_SECONDS);
+            Expiration ttl = Expiration.seconds(ttlSeconds);
             byte[] one = "1".getBytes(StandardCharsets.UTF_8);
             redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
                 for (NormalizedTradeDTO trade : trades) {
