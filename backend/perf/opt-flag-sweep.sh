@@ -107,11 +107,23 @@ run_one baseline "$OUT/base.env"
 for spec in "$@"; do
   # 기본은 false 로 끈다. "FLAG=true" 처럼 값을 지정하면 그 값으로 켠다 — baseline 에서
   # 이미 false 인 플래그(예: STORAGE_IDEMPOTENCY_PIPELINE)를 반대로 켜서 재는 용도.
-  if [[ "$spec" == *=* ]]; then FLAG=${spec%%=*}; VAL=${spec#*=}; else FLAG=$spec; VAL=false; fi
-  name="${VAL}_${FLAG#STOCKFLOW_OPT_}"
-  grep -v "^${FLAG}=" "$OUT/base.env" > "$OUT/$name.env" || true
-  echo "${FLAG}=${VAL}" >> "$OUT/$name.env"
-  log "════════ $FLAG=$VAL ════════"
+  if [[ "$spec" == *::* ]]; then
+    # "라벨::VAR=값;VAR2=값2" — 여러 환경변수를 한 번에 바꾼 조합을 한 런으로 잰다.
+    name=${spec%%::*}; pairs=${spec#*::}
+  elif [[ "$spec" == *=* ]]; then
+    FLAG=${spec%%=*}; VAL=${spec#*=}; name="${VAL}_${FLAG#STOCKFLOW_OPT_}"; pairs="$spec"
+  else
+    FLAG=$spec; name="false_${FLAG#STOCKFLOW_OPT_}"; pairs="${FLAG}=false"
+  fi
+  cp "$OUT/base.env" "$OUT/$name.env"
+  IFS=';' read -ra kvs <<< "$pairs"
+  for kv in "${kvs[@]}"; do
+    k=${kv%%=*}
+    grep -v "^${k}=" "$OUT/$name.env" > "$OUT/$name.env.tmp" || true
+    mv "$OUT/$name.env.tmp" "$OUT/$name.env"
+    echo "$kv" >> "$OUT/$name.env"
+  done
+  log "════════ $name  ($pairs) ════════"
   run_one "$name" "$OUT/$name.env"
 done
 
