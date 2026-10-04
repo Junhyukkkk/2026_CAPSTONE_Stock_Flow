@@ -4,6 +4,7 @@ import com.stockflow.core.dto.NormalizedTradeDTO;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -45,6 +46,17 @@ public class KafkaConsumerConfig {
     @Value("${spring.kafka.consumer.fetch-max-wait:500}")
     private int fetchMaxWait;
 
+    // 저장 컨슈머(StorageConsumer) 전용 배치 설정. 미지정 시 공유 값(위 3개)을 그대로 따르므로 동작 불변.
+    // 저장 경로는 트랜잭션·커넥션 획득·멱등성 체크가 poll 당 1회씩 반복되므로 배치를 키우면 이득이 있을 수 있다.
+    @Value("${KAFKA_STORAGE_MAX_POLL_RECORDS:${spring.kafka.consumer.max-poll-records:100}}")
+    private int storageMaxPollRecords;
+
+    @Value("${KAFKA_STORAGE_FETCH_MIN_BYTES:${spring.kafka.consumer.fetch-min-size:1}}")
+    private int storageFetchMinBytes;
+
+    @Value("${KAFKA_STORAGE_FETCH_MAX_WAIT_MS:${spring.kafka.consumer.fetch-max-wait:500}}")
+    private int storageFetchMaxWaitMs;
+
     @Value("${spring.kafka.consumer.concurrency:4}")
     private int concurrency;
 
@@ -71,13 +83,29 @@ public class KafkaConsumerConfig {
     private long storageConsumerErrorBackoffMs;
 
     /**
-     * Consumer Factory 설정
+     * Consumer Factory 설정 (RealtimeConsumer 용 기본 팩토리)
      *
      * 수동 커밋 모드로 설정하여 메시지 처리 성공 후에만 커밋
      * Micrometer를 통해 Kafka Consumer 메트릭을 Prometheus에 노출
      */
     @Bean
     public ConsumerFactory<String, NormalizedTradeDTO> consumerFactory(MeterRegistry meterRegistry) {
+        return buildConsumerFactory(meterRegistry, maxPollRecords, fetchMinSize, fetchMaxWait);
+    }
+
+    /**
+     * Storage 전용 Consumer Factory (StorageConsumer 용)
+     *
+     * 기본 팩토리와 모든 설정이 동일하되 max.poll.records / fetch.min.bytes / fetch.max.wait.ms 만
+     * KAFKA_STORAGE_* 로 따로 조정할 수 있다. 미지정 시 기본 팩토리와 같은 값.
+     */
+    @Bean
+    public ConsumerFactory<String, NormalizedTradeDTO> storageConsumerFactory(MeterRegistry meterRegistry) {
+        return buildConsumerFactory(meterRegistry, storageMaxPollRecords, storageFetchMinBytes, storageFetchMaxWaitMs);
+    }
+
+    private ConsumerFactory<String, NormalizedTradeDTO> buildConsumerFactory(
+            MeterRegistry meterRegistry, int pollRecords, int fetchMinBytes, int fetchMaxWaitMs) {
         Map<String, Object> props = new HashMap<>();
 
         // 기본 설정
@@ -94,10 +122,10 @@ public class KafkaConsumerConfig {
         // 오프셋 리셋 정책 (spring.kafka.consumer.auto-offset-reset 로 설정, 장애 복구 시 운영자가 조정)
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
 
-        // 배치 처리 설정 (Storage Consumer용)
-        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, maxPollRecords);
-        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, fetchMinSize);
-        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, fetchMaxWait);
+        // 배치 처리 설정
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, pollRecords);
+        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, fetchMinBytes);
+        props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, fetchMaxWaitMs);
 
         // 세션 타임아웃 설정
         props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, sessionTimeoutMs);
@@ -131,7 +159,7 @@ public class KafkaConsumerConfig {
      */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> kafkaListenerContainerFactory(
-            ConsumerFactory<String, NormalizedTradeDTO> consumerFactory) {
+            @Qualifier("consumerFactory") ConsumerFactory<String, NormalizedTradeDTO> consumerFactory) {
         ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> factory =
             new ConcurrentKafkaListenerContainerFactory<>();
 
@@ -154,11 +182,11 @@ public class KafkaConsumerConfig {
      */
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> batchKafkaListenerContainerFactory(
-            ConsumerFactory<String, NormalizedTradeDTO> consumerFactory) {
+            @Qualifier("storageConsumerFactory") ConsumerFactory<String, NormalizedTradeDTO> storageConsumerFactory) {
         ConcurrentKafkaListenerContainerFactory<String, NormalizedTradeDTO> factory =
             new ConcurrentKafkaListenerContainerFactory<>();
 
-        factory.setConsumerFactory(consumerFactory);
+        factory.setConsumerFactory(storageConsumerFactory);
 
         // 배치 모드 설정
         factory.setBatchListener(true);
