@@ -46,15 +46,16 @@ public class KafkaConsumerConfig {
     @Value("${spring.kafka.consumer.fetch-max-wait:500}")
     private int fetchMaxWait;
 
-    // 저장 컨슈머(StorageConsumer) 전용 배치 설정. 미지정 시 공유 값(위 3개)을 그대로 따르므로 동작 불변.
-    // 저장 경로는 트랜잭션·커넥션 획득·멱등성 체크가 poll 당 1회씩 반복되므로 배치를 키우면 이득이 있을 수 있다.
-    @Value("${KAFKA_STORAGE_MAX_POLL_RECORDS:${spring.kafka.consumer.max-poll-records:100}}")
+    // 저장 컨슈머(StorageConsumer) 전용 배치 설정. 저장 경로는 트랜잭션·커넥션 획득·멱등성 체크가
+    // poll 당 1회씩 반복되므로 realtime 공유 값(위 3개)과 분리해 큰 배치를 기본으로 둔다.
+    // 옛 동작(공유 값과 동일)으로 되돌리려면 KAFKA_STORAGE_* 를 100/1/500 으로 지정한다.
+    @Value("${KAFKA_STORAGE_MAX_POLL_RECORDS:500}")
     private int storageMaxPollRecords;
 
-    @Value("${KAFKA_STORAGE_FETCH_MIN_BYTES:${spring.kafka.consumer.fetch-min-size:1}}")
+    @Value("${KAFKA_STORAGE_FETCH_MIN_BYTES:65536}")
     private int storageFetchMinBytes;
 
-    @Value("${KAFKA_STORAGE_FETCH_MAX_WAIT_MS:${spring.kafka.consumer.fetch-max-wait:500}}")
+    @Value("${KAFKA_STORAGE_FETCH_MAX_WAIT_MS:100}")
     private int storageFetchMaxWaitMs;
 
     @Value("${spring.kafka.consumer.concurrency:4}")
@@ -97,7 +98,7 @@ public class KafkaConsumerConfig {
      * Storage 전용 Consumer Factory (StorageConsumer 용)
      *
      * 기본 팩토리와 모든 설정이 동일하되 max.poll.records / fetch.min.bytes / fetch.max.wait.ms 만
-     * KAFKA_STORAGE_* 로 따로 조정할 수 있다. 미지정 시 기본 팩토리와 같은 값.
+     * KAFKA_STORAGE_* 로 따로 조정할 수 있다(기본 500 / 65536 / 100).
      */
     @Bean
     public ConsumerFactory<String, NormalizedTradeDTO> storageConsumerFactory(MeterRegistry meterRegistry) {

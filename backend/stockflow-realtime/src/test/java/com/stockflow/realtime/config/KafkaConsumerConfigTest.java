@@ -19,7 +19,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 저장 컨슈머 전용 ConsumerFactory 분리 검증.
- * 기본값에서는 realtime 팩토리와 동일하고, KAFKA_STORAGE_* 는 storage 팩토리에만 반영되어야 한다.
+ * storage 팩토리는 검증된 기본값(500/65536/100)을 쓰고 realtime 팩토리(100/1/500)는 불변이어야 하며,
+ * KAFKA_STORAGE_* 는 storage 팩토리에만 반영되어야 한다.
  */
 class KafkaConsumerConfigTest {
 
@@ -40,7 +41,7 @@ class KafkaConsumerConfigTest {
     }
 
     @Test
-    void defaultsMatchSharedValues() {
+    void defaultsAreTunedForStorageAndUnchangedForRealtime() {
         runner.run(ctx -> {
             Map<String, Object> realtime = props(factoryOf(ctx, "kafkaListenerContainerFactory"));
             Map<String, Object> storage = props(factoryOf(ctx, "batchKafkaListenerContainerFactory"));
@@ -48,21 +49,45 @@ class KafkaConsumerConfigTest {
             assertThat(realtime.get(ConsumerConfig.MAX_POLL_RECORDS_CONFIG)).isEqualTo(100);
             assertThat(realtime.get(ConsumerConfig.FETCH_MIN_BYTES_CONFIG)).isEqualTo(1);
             assertThat(realtime.get(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG)).isEqualTo(500);
-            assertThat(storage).isEqualTo(realtime);
+
+            assertThat(storage.get(ConsumerConfig.MAX_POLL_RECORDS_CONFIG)).isEqualTo(500);
+            assertThat(storage.get(ConsumerConfig.FETCH_MIN_BYTES_CONFIG)).isEqualTo(65536);
+            assertThat(storage.get(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG)).isEqualTo(100);
+            // max.poll.interval.ms 는 두 팩토리 모두 그대로
+            assertThat(storage.get(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG)).isEqualTo(300000);
+            assertThat(realtime.get(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG)).isEqualTo(300000);
         });
     }
 
     @Test
-    void storageFactoryFollowsSharedOverridesWhenNoStorageEnvIsSet() {
+    void sharedOverridesDoNotAffectStorageFactoryDefaults() {
         runner.withPropertyValues(
             "spring.kafka.consumer.max-poll-records=250",
             "spring.kafka.consumer.fetch-min-size=64",
             "spring.kafka.consumer.fetch-max-wait=200").run(ctx -> {
+            Map<String, Object> realtime = props(factoryOf(ctx, "kafkaListenerContainerFactory"));
             Map<String, Object> storage = props(factoryOf(ctx, "batchKafkaListenerContainerFactory"));
 
-            assertThat(storage.get(ConsumerConfig.MAX_POLL_RECORDS_CONFIG)).isEqualTo(250);
-            assertThat(storage.get(ConsumerConfig.FETCH_MIN_BYTES_CONFIG)).isEqualTo(64);
-            assertThat(storage.get(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG)).isEqualTo(200);
+            assertThat(realtime.get(ConsumerConfig.MAX_POLL_RECORDS_CONFIG)).isEqualTo(250);
+            assertThat(realtime.get(ConsumerConfig.FETCH_MIN_BYTES_CONFIG)).isEqualTo(64);
+            assertThat(realtime.get(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG)).isEqualTo(200);
+
+            assertThat(storage.get(ConsumerConfig.MAX_POLL_RECORDS_CONFIG)).isEqualTo(500);
+            assertThat(storage.get(ConsumerConfig.FETCH_MIN_BYTES_CONFIG)).isEqualTo(65536);
+            assertThat(storage.get(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG)).isEqualTo(100);
+        });
+    }
+
+    @Test
+    void storageEnvOldValuesRestoreOldBehavior() {
+        runner.withPropertyValues(
+            "KAFKA_STORAGE_MAX_POLL_RECORDS=100",
+            "KAFKA_STORAGE_FETCH_MIN_BYTES=1",
+            "KAFKA_STORAGE_FETCH_MAX_WAIT_MS=500").run(ctx -> {
+            Map<String, Object> realtime = props(factoryOf(ctx, "kafkaListenerContainerFactory"));
+            Map<String, Object> storage = props(factoryOf(ctx, "batchKafkaListenerContainerFactory"));
+
+            assertThat(storage).isEqualTo(realtime);
         });
     }
 

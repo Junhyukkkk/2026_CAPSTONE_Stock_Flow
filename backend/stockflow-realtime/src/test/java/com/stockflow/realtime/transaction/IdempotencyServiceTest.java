@@ -109,7 +109,7 @@ class IdempotencyServiceTest {
         verify(valueOperations, times(1)).set(
                 anyString(),
                 eq("1"),
-                eq(86400L),
+                eq(600L),
                 eq(TimeUnit.SECONDS)
         );
     }
@@ -126,14 +126,34 @@ class IdempotencyServiceTest {
         verify(valueOperations, times(5)).set(
                 anyString(),
                 eq("1"),
-                eq(86400L),
+                eq(600L),
                 eq(TimeUnit.SECONDS)
         );
     }
 
     @Test
-    void ttlDefaultsTo86400() {
-        assertEquals(86400L, ReflectionTestUtils.getField(idempotencyService, "ttlSeconds"));
+    void ttlDefaultsTo600() {
+        assertEquals(600L, ReflectionTestUtils.getField(idempotencyService, "ttlSeconds"));
+    }
+
+    @Test
+    void validateTtl_acceptsPositiveValues() {
+        assertDoesNotThrow(() -> idempotencyService.validateTtl());
+
+        ReflectionTestUtils.setField(idempotencyService, "ttlSeconds", 86400L);
+        assertDoesNotThrow(() -> idempotencyService.validateTtl());
+    }
+
+    @Test
+    void validateTtl_rejectsZeroAndNegative() {
+        for (long bad : new long[]{0L, -1L}) {
+            ReflectionTestUtils.setField(idempotencyService, "ttlSeconds", bad);
+
+            IllegalArgumentException e =
+                    assertThrows(IllegalArgumentException.class, () -> idempotencyService.validateTtl());
+            assertTrue(e.getMessage().contains("STOCKFLOW_IDEMPOTENCY_TTL_SECONDS"));
+            assertTrue(e.getMessage().contains(String.valueOf(bad)));
+        }
     }
 
     @Test
