@@ -64,7 +64,7 @@ wait_up() {  # $1=timeout(s)
   return 1
 }
 
-IMAGE=$(docker inspect "$LIVE" --format '{{.Config.Image}}')
+IMAGE=${IMAGE:-$(docker inspect "$LIVE" --format '{{.Config.Image}}')}   # IMAGE=stockflow-app:rev-<short> 로 다른 빌드를 지정할 수 있다
 docker inspect "$LIVE" --format '{{range .Config.Env}}{{println .}}{{end}}' \
   | grep -vE '^(PATH|HOME|HOSTNAME|JAVA_HOME|JAVA_VERSION|LANG|LC_ALL|TERM)=' | grep -v '^$' \
   > "$OUT/base.env"
