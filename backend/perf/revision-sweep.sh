@@ -12,7 +12,7 @@
 #         1f814a5=1000,2000,3000,4000,5000 \
 #         30c7a5a=2000,4000,6000,8000,9000,10000
 #
-# DROP_ENV(정규식)=운영 env 에서 뺄 줄, APP_CPUSET=시험 앱 컨테이너를 고정할 코어(예: 0-5, 분석 예약 코어 회피).
+# EXTRA_ENV='K=V;K2=V2'=env 파일에 덮어쓸 값(옛 시점 운영 조건 재현용). DROP_ENV(정규식)=운영 env 에서 뺄 줄, APP_CPUSET=시험 앱 컨테이너를 고정할 코어(예: 0-5, 분석 예약 코어 회피).
 # rate 를 생략하면 RATES 환경변수(없으면 tps-sweep.sh 기본값)를 쓴다.
 # HOLD / DRAIN_WAIT 등 나머지 환경변수는 tps-sweep.sh 로 그대로 전달된다.
 # 어떤 ref 가 기동에 실패하면 그 ref 만 FAILED 로 기록하고 다음으로 넘어간다.
@@ -77,6 +77,18 @@ add_spring_redis_pw() {  # $1=env 파일 (값은 로그에 찍지 않는다)
   chmod 600 "$1"
 }
 
+# EXTRA_ENV="K=V;K2=V2" — 운영 env 에 없던 값(예: 옛 운영 시점의 고정값)을 env 파일에 덮어쓴다
+apply_extra_env() {  # $1=env 파일
+  [ -n "${EXTRA_ENV:-}" ] || return 0
+  local kv k; IFS=';' read -ra _kvs <<< "$EXTRA_ENV"
+  for kv in "${_kvs[@]}"; do
+    k=${kv%%=*}
+    { grep -v "^${k}=" "$1" || true; } > "$1.tmp" && mv "$1.tmp" "$1"
+    echo "$kv" >> "$1"
+  done
+  chmod 600 "$1"
+}
+
 wait_up() {  # $1=timeout(s)
   local n=$(( $1 / 3 ))
   for _ in $(seq 1 "$n"); do
@@ -97,6 +109,7 @@ if [ -n "${DROP_ENV:-}" ]; then
   { grep -vE "$DROP_ENV" "$OUT/rt.env" || true; } > "$OUT/rt.env.tmp" && mv "$OUT/rt.env.tmp" "$OUT/rt.env"
 fi
 add_spring_redis_pw "$OUT/rt.env"
+apply_extra_env "$OUT/rt.env"
 LIVE_IMAGE=$(docker inspect "$LIVE" --format '{{.Config.Image}}')
 log "결과 → $OUT   (원래 이미지: $LIVE_IMAGE, env $(wc -l < "$OUT/rt.env")줄)"
 
