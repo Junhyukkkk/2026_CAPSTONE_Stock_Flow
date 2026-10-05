@@ -39,7 +39,17 @@ curl -s --max-time 10 "$APP_URL/actuator/prometheus" > "$PREFIX.prom" 2>/dev/nul
   fi
 } &
 
-tmo 15 docker exec "$REDIS_C" redis-cli INFO > "$PREFIX.redis" 2>/dev/null || echo "(redis 실패)" > "$PREFIX.redis" &
+{
+  # 고부하에서 docker exec 가 15s 안에 안 끝나는 경우가 있어(호스트 과부하) 두 번 더
+  # 재시도한다. evicted_keys 델타 계산이 이 값에 의존하는데, 한쪽만 실패해서 0으로
+  # 착각하면 델타가 수천만 단위로 음수가 튄다(9/21 v2 관측) — 그래서 실패 표시를 남긴다.
+  ok=0
+  for _ in 1 2 3; do
+    tmo 15 docker exec "$REDIS_C" redis-cli INFO > "$PREFIX.redis" 2>/dev/null && grep -q '^evicted_keys:' "$PREFIX.redis" && { ok=1; break; }
+    sleep 2
+  done
+  [ "$ok" = 1 ] || echo "(redis 실패)" > "$PREFIX.redis"
+} &
 
 # count(*) 는 857M 행 seqscan 이라 금지. tup_inserted 델타로 삽입량을 잡고,
 # 행수는 통계 추정치(n_live_tup)만 참고로 남긴다.

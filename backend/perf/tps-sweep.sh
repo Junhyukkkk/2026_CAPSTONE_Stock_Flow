@@ -16,10 +16,32 @@
 # 주요 환경변수 (기본값):
 #   RATES="2000 3000 4000 4300 5000 6000 7000 8000"
 #   HOLD=180  DRAIN_WAIT=150  SETTLE=30  SAMPLE_INTERVAL=5
-#   WORKERS=6  SYMBOLS=50  STOP_COLLECTORS=1
+#   WORKERS=6  SYMBOLS=50  STOP_COLLECTORS=1  FORCE_CLI=0 (1이면 앱 지표 대신 브로커 CLI로 측정)
 #   NETWORK=infra_default  LOADGEN_IMAGE=collectors-binance-collector:latest
 #   COLLECTORS_DIR=/home/capstone01/capstone/collectors
 #   APP_C=stockflow-realtime  KAFKA_C=stockflow-kafka  REDIS_C=stockflow-redis  PG_C=stockflow-timescaledb
+#
+# 시뮬레이터 부하 모드 (LOADGEN_MODE=sim, 기본 loadgen = 합성 loadgen.py 그대로):
+#   loadgen.py 대신 stock_simulator.py(SIM_RATE_MODE=realistic)를 HOLD 초 동안 돌려 실제 미국 주식
+#   종목·가격대의 체결 흐름으로 부하를 준다. 라벨은 SIM_SOURCE_LABEL(기본 SIMLOAD)로 분리돼 나중에
+#   source 한 가지로 지울 수 있다. 측정 중에는 라이브 시뮬레이터(stockflow-stock-simulator)를 반드시
+#   멈춘다(COLLECTORS 기본 목록에 포함) — DB 는 라벨(SIMULATOR/SIMLOAD)로 구분되지만 Redis
+#   price:latest:{symbol} 은 심볼 키라 두 시뮬레이터가 섞이기 때문.
+#     SIM_CODE_DIR=/home/capstone01/sim-code/collectors  SIM_CPUS=2  SIM_SOURCE_LABEL=SIMLOAD
+#     SIM_BASE_TPS=832.479   # universe.csv 105종목 합계 평균 TPS. SIM_RATE_SCALE = rate / SIM_BASE_TPS
+#     SIM_CPUSET=            # 비우면 고정 안 함. 예: SIM_CPUSET=0-5 → 부하 생성기를 해당 코어에만 고정
+#                            # (분석 서비스용으로 예약한 코어를 피하려는 용도; docker run --cpuset-cpus 로 전달)
+#   effective_rate 는 시뮬레이터 "📊 최종 통계 | … | 전송: N건" 줄(그 줄만; 주기 통계 줄은 무시)을 HOLD 로
+#   나눈 값이라, 컨테이너 기동·시작가 로딩에 걸리는 몇 초만큼 실제 발생률보다 약간 낮게(보수적으로) 나온다.
+#   최종 통계 줄이 없으면(설정 오류·크래시·강제종료 등) effective_rate 를 만들지 않아 판정은 "?" 가 된다.
+#   시뮬레이터 컨테이너 이름은 stockflow-loadgen-sim-<스윕 PID> 로 고정되고 종료 시 cleanup 이 강제 제거한다.
+#
+# 분석 API 응답시간 프로브 (ANALYSIS_PROBE=1, 기본 0):
+#   각 rate 의 hold 동안 ANALYSIS_PROBE_INTERVAL(15)초마다 /api/predictions/<SYM>/compare 를 순차 1건씩
+#   호출해 $OUT/analysis_probe.csv(timestamp,rate,symbol,http,seconds)에 기록하고 SUMMARY.md 에 표로 정리.
+#     ANALYSIS_PROBE_SYMBOLS="AAPL NVDA MSFT TSLA SPY"  ANALYSIS_PROBE_SOURCE=SIMULATOR
+#     ANALYSIS_PROBE_WARMUP=10   # LOADGEN_MODE=sim 일 때만: 첫 호출을 hold 시작 N초 뒤로 미룸(시뮬레이터
+#                                # 컨테이너가 뜨기 전 무부하 표본이 섞이는 편향 방지). sim 이 아니면 항상 0.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,12 +62,24 @@ LOADGEN_IMAGE=${LOADGEN_IMAGE:-collectors-binance-collector:latest}
 COLLECTORS_DIR=${COLLECTORS_DIR:-/home/capstone01/capstone/collectors}
 PERF_DIR="$SCRIPT_DIR"
 
+LOADGEN_MODE=${LOADGEN_MODE:-loadgen}
+SIM_CODE_DIR=${SIM_CODE_DIR:-/home/capstone01/sim-code/collectors}
+SIM_CPUS=${SIM_CPUS:-2}
+SIM_SOURCE_LABEL=${SIM_SOURCE_LABEL:-SIMLOAD}
+SIM_BASE_TPS=${SIM_BASE_TPS:-832.479}
+SIM_CPUSET=${SIM_CPUSET:-}
+SIM_CONTAINER="stockflow-loadgen-sim-$$"
+ANALYSIS_PROBE=${ANALYSIS_PROBE:-0}
+ANALYSIS_PROBE_INTERVAL=${ANALYSIS_PROBE_INTERVAL:-15}
+ANALYSIS_PROBE_SYMBOLS=${ANALYSIS_PROBE_SYMBOLS:-"AAPL NVDA MSFT TSLA SPY"}
+ANALYSIS_PROBE_SOURCE=${ANALYSIS_PROBE_SOURCE:-SIMULATOR}
+
 APP_URL=${APP_URL:-http://localhost:8081}
 APP_C=${APP_C:-stockflow-realtime}
 KAFKA_C=${KAFKA_C:-stockflow-kafka}
 REDIS_C=${REDIS_C:-stockflow-redis}
 PG_C=${PG_C:-stockflow-timescaledb}
-COLLECTORS=${COLLECTORS:-"stockflow-binance-collector stockflow-alpaca-collector"}
+COLLECTORS=${COLLECTORS:-"stockflow-binance-collector stockflow-alpaca-collector stockflow-stock-simulator"}
 KAFKA_BOOTSTRAP=${KAFKA_BOOTSTRAP:-localhost:9092}
 TOPIC=${TOPIC:-market.normalized}
 REALTIME_GROUP=${REALTIME_GROUP:-realtime-group}
@@ -54,6 +88,8 @@ STORAGE_GROUP=${STORAGE_GROUP:-storage-group}
 OUT="$SCRIPT_DIR/results/sweep_${LABEL}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUT"
 export APP_URL APP_C KAFKA_C REDIS_C PG_C KAFKA_BOOTSTRAP REALTIME_GROUP STORAGE_GROUP
+if [ "$LOADGEN_MODE" = sim ]; then ANALYSIS_PROBE_WARMUP=${ANALYSIS_PROBE_WARMUP:-10}; else ANALYSIS_PROBE_WARMUP=0; fi
+export ANALYSIS_PROBE_INTERVAL ANALYSIS_PROBE_SYMBOLS ANALYSIS_PROBE_SOURCE ANALYSIS_PROBE_WARMUP
 
 log() { echo -e "\033[1;36m[$(date +%H:%M:%S)]\033[0m $*"; }
 app_prom() { curl -s --max-time 10 "$APP_URL/actuator/prometheus" 2>/dev/null; }
@@ -63,20 +99,87 @@ prom_sum() { awk '$0 !~ /^#/ { v=$NF; if (v+0==v) s+=v } END { printf "%.0f", s 
 # 비어 있는지를 먼저 확인해 빈 문자열을 전파한다 — 호출부의 l=${l:-...} 폴백이 실제로
 # "값을 모름(=drained 아님으로 취급)"에 걸리도록 하기 위함. sampler()의 prom_prev 재사용과
 # 같은 문제(빈 응답을 유효한 0으로 착각)를 다른 방식으로 해결한다.
+# 옛 버전 앱(3월)은 Kafka 컨슈머 지표(kafka_consumer_fetch_manager_*)를 노출하지 않는다.
+# 그런 경우 kafka-consumer-groups CLI 로 대체한다: CURRENT-OFFSET 합 = 소비 누적,
+# LAG 합 = 적체. 시작 시 지표 유무를 한 번 확인해 USE_CLI 를 정한다.
+# 고부하에서 docker exec 자체가 몇 초씩 멎는 경우가 있어(호스트 CPU 과부하), 한 번 실패로
+# 끝내지 않고 짧게 재시도한다. 그래도 실패하면 빈 문자열을 반환한다(호출부가 "모름"으로
+# 취급하도록 — 0으로 착각하면 A/B 델타가 음수로 튀는 원인이 된다, 9/21 v2 관측).
+cg_describe() {  # $1=realtime|storage
+  local out=""
+  for _ in 1 2 3; do
+    out=$(timeout 20 docker exec "$KAFKA_C" kafka-consumer-groups --bootstrap-server "$KAFKA_BOOTSTRAP" --group "$1-group" --describe 2>/dev/null || true)
+    echo "$out" | grep -q "$TOPIC" && break
+    out=""; sleep 2
+  done
+  printf '%s' "$out"
+}
+cg_sum() {  # $1=describe 출력, $2=consumed_total|lag
+  [ -z "$1" ] && return 0   # cg_describe 완전 실패(빈 응답) → 빈 문자열 반환("모름"), 0 아님
+  echo "$1" | awk -v t="$TOPIC" -v k="$2" '$2==t { if (k=="lag" && $6 ~ /^[0-9]+$/) s+=$6; if (k=="consumed_total" && $4 ~ /^[0-9]+$/) s+=$4 } END { print s+0 }'
+}
+USE_CLI=0   # 앱 기동 확인 후(wait_health 다음) 지표 유무로 결정
 total_lag() {
   local prom
+  if [ "$USE_CLI" = 1 ]; then cg_sum "$(cg_describe "$1")" lag; return 0; fi
   prom=$(app_prom)
   [ -z "$prom" ] && return 0
-  echo "$prom" | grep '^kafka_consumer_fetch_manager_records_lag{' | grep "$1-group" | prom_sum
+  echo "$prom" | { grep '^kafka_consumer_fetch_manager_records_lag{' || true; } | { grep "$1-group" || true; } | prom_sum
+}
+consumed_total() {  # $1=realtime|storage  $2=스냅샷 .prom 파일
+  if [ "$USE_CLI" = 1 ]; then cg_sum "$(cg_describe "$1")" consumed_total; return 0; fi
+  { grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$2" || true; } | { grep "$1-group" || true; } | prom_sum
 }
 
-run_loadgen() {  # $1=rate $2=duration $3=logfile
+run_loadgen_synthetic() {  # $1=rate $2=duration $3=logfile
   docker run --rm --network "$NETWORK" \
     -v "$COLLECTORS_DIR":/app -v "$PERF_DIR":/perf -w /app \
     -e PYTHONPATH=/app -e KAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
     -e RATE="$1" -e DURATION="$2" -e WORKERS="$WORKERS" -e SYMBOLS="$SYMBOLS" \
     -e BATCH_TICK_MS=5 -e TOPIC="$TOPIC" \
     "$LOADGEN_IMAGE" python /perf/loadgen.py > "$3" 2>&1
+}
+
+sim_scale() {  # $1=목표 rate → SIM_RATE_SCALE (소수 6자리)
+  awk -v r="$1" -v b="$SIM_BASE_TPS" 'BEGIN{printf "%.6f", r/b}'
+}
+sim_effective_line() {  # $1=로그 $2=duration → "최종 통계" 줄의 "전송: N건" 으로 effective_rate=<N/duration> 한 줄 (없으면 무출력)
+  local n   # 주기 "📊 통계 | 전송:" 줄은 중간값이라 쓰지 않는다 — 최종 통계 줄만.
+  n=$(grep -E '최종 통계' "$1" 2>/dev/null | grep -oE '전송: [0-9][0-9,]*건' | tail -1 | grep -oE '[0-9][0-9,]*' | tr -d ',' || true)
+  [ -n "$n" ] && awk -v n="$n" -v d="$2" 'BEGIN{printf "effective_rate=%.1f\n", n/d}'
+  return 0
+}
+run_loadgen_sim() {  # $1=rate $2=duration $3=logfile
+  local rc=0 scale
+  scale=$(sim_scale "$1")
+  # timeout 은 SIGTERM 으로 시뮬레이터를 끝내고(최종 통계 출력) 종료코드 124 를 돌려준다 — 정상 종료.
+  docker run --rm --name "$SIM_CONTAINER" --network "$NETWORK" \
+    -v "$SIM_CODE_DIR":/app:ro -w /app \
+    -e PYTHONPATH=/app -e PYTHONDONTWRITEBYTECODE=1 \
+    -e KAFKA_BOOTSTRAP_SERVERS=kafka:9092 -e KAFKA_TOPIC_NAME="$TOPIC" \
+    -e SIM_RATE_MODE=realistic -e SIM_MARKET_HOURS=always -e SIM_PRICE_SOURCE=static \
+    -e SIM_SOURCE_LABEL="$SIM_SOURCE_LABEL" -e SIM_RATE_SCALE="$scale" \
+    --cpus "$SIM_CPUS" ${SIM_CPUSET:+--cpuset-cpus "$SIM_CPUSET"} \
+    "$LOADGEN_IMAGE" timeout -k 15 "$2" python stock_simulator.py > "$3" 2>&1 || rc=$?
+  echo "sim_scale=$scale target_rate=$1 duration=$2 exit=$rc" >> "$3"
+  sim_effective_line "$3" "$2" >> "$3"
+  [ "$rc" = 0 ] || [ "$rc" = 124 ] || [ "$rc" = 143 ]
+}
+run_loadgen() {  # $1=rate $2=duration $3=logfile
+  if [ "$LOADGEN_MODE" = sim ]; then run_loadgen_sim "$@"; else run_loadgen_synthetic "$@"; fi
+}
+
+# 분석 API 프로브(백그라운드, 순차 1건): hold 동안만 돌고 stop_probe/cleanup 에서 반드시 죽인다.
+PROBE_PID=""
+start_probe() {  # $1=rate
+  [ "$ANALYSIS_PROBE" = 1 ] || return 0
+  "$SCRIPT_DIR/analysis_probe.sh" "$1" "$OUT/analysis_probe.csv" & PROBE_PID=$!
+}
+stop_probe() {
+  [ -n "$PROBE_PID" ] || return 0
+  kill "$PROBE_PID" 2>/dev/null || true
+  wait "$PROBE_PID" 2>/dev/null || true
+  PROBE_PID=""
 }
 
 wait_health() {
@@ -91,6 +194,8 @@ wait_health() {
 {
   echo "# TPS 스윕 환경  $(date -Is)"
   echo "label=$LABEL rates=$RATES hold=${HOLD}s workers=$WORKERS"
+  [ "$LOADGEN_MODE" = sim ] && echo "loadgen_mode=sim label=$SIM_SOURCE_LABEL base_tps=$SIM_BASE_TPS cpus=$SIM_CPUS cpuset=${SIM_CPUSET:-none} code=$SIM_CODE_DIR"
+  [ "$ANALYSIS_PROBE" = 1 ] && echo "analysis_probe=1 interval=${ANALYSIS_PROBE_INTERVAL}s symbols=$ANALYSIS_PROBE_SYMBOLS"
   echo; echo "== host =="; echo "nproc=$(nproc)"; free -h; uname -a; uptime
   echo; echo "== kafka topic =="
   docker exec "$KAFKA_C" kafka-topics --bootstrap-server "$KAFKA_BOOTSTRAP" --describe --topic "$TOPIC" 2>/dev/null
@@ -107,6 +212,11 @@ wait_health() {
 } > "$OUT/env.txt" 2>&1
 log "환경 → $OUT/env.txt"
 wait_health
+if [ "${FORCE_CLI:-0}" = 1 ]; then
+  USE_CLI=1; log "FORCE_CLI=1 → 소비/적체를 Kafka 브로커(kafka-consumer-groups) 기준으로 측정"
+elif [ "$(app_prom | grep -c '^kafka_consumer_fetch_manager_records_consumed_total{' || true)" = "0" ]; then
+  USE_CLI=1; log "앱에 Kafka 컨슈머 지표 없음 → kafka-consumer-groups CLI 로 소비/적체 측정"
+fi
 
 # ── 1. 파티션 조정 (옵션) ───────────────────────────────────────
 CUR_PARTS=$(docker exec "$KAFKA_C" kafka-topics --bootstrap-server "$KAFKA_BOOTSTRAP" \
@@ -129,6 +239,8 @@ fi
 cleanup() {
   set +e
   [ -n "${SAMPLER_PID:-}" ] && kill "$SAMPLER_PID" 2>/dev/null
+  [ -n "${PROBE_PID:-}" ] && kill "$PROBE_PID" 2>/dev/null
+  [ "$LOADGEN_MODE" = sim ] && docker rm -f "$SIM_CONTAINER" >/dev/null 2>&1
   for c in $STOPPED; do docker start "$c" >/dev/null 2>&1 && log "재기동: $c"; done
 }
 trap cleanup EXIT
@@ -151,7 +263,15 @@ sampler() {
     stats=$(timeout 25 docker stats --no-stream --format '{{.Name}} {{.CPUPerc}}' "$APP_C" "$KAFKA_C" "$REDIS_C" "$PG_C" 2>/dev/null)
     free_out=$(free -m 2>/dev/null)
     ph=$(cat "$PHASEF" 2>/dev/null); ph=${ph:-idle 0}
-    g() { echo "$prom" | grep "^kafka_consumer_fetch_manager_records_$1{" | grep "$2-group" | prom_sum; }
+    local d_rt="" d_st=""
+    if [ "$USE_CLI" = 1 ]; then d_rt=$(cg_describe realtime); d_st=$(cg_describe storage); fi
+    g() {
+      if [ "$USE_CLI" = 1 ]; then
+        if [ "$2" = realtime ]; then cg_sum "$d_rt" "$1"; else cg_sum "$d_st" "$1"; fi
+      else
+        echo "$prom" | { grep "^kafka_consumer_fetch_manager_records_$1{" || true; } | { grep "$2-group" || true; } | prom_sum
+      fi
+    }
     pv() { echo "$prom" | awk -v m="$1" '$0 ~ "^"m"([ {])" && $0 !~ /^#/ {print $NF; exit}'; }
     rf() { echo "$redis" | awk -F: -v k="$1" '$1==k{gsub(/[^0-9.]/,"",$2); print $2; exit}'; }
     cpu() { echo "$stats" | awk -v n="$1" '$1==n{gsub(/%/,"",$2); print $2+0; exit}'; }
@@ -163,27 +283,40 @@ sampler & SAMPLER_PID=$!
 
 # ── 4. rate 스윕 ───────────────────────────────────────────────
 echo "rate,effective_send,consume_realtime,consume_storage,peak_lag_rt,end_lag_rt,drain_s,verdict" > "$OUT/summary.csv"
+[ "$ANALYSIS_PROBE" = 1 ] && echo "timestamp,rate,symbol,http,seconds" > "$OUT/analysis_probe.csv"
 for RATE in $RATES; do
   log "════════ rate=$RATE msg/s (${HOLD}s) ════════"
   setphase snapA "$RATE"
   "$SCRIPT_DIR/snapshot.sh" "$OUT/${RATE}_A" >/dev/null
   a_epoch=$(date +%s)
-  a_rt=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_A.prom" | grep realtime-group | prom_sum)
-  a_st=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_A.prom" | grep storage-group | prom_sum)
+  a_rt=$(consumed_total realtime "$OUT/${RATE}_A.prom")
+  a_st=$(consumed_total storage "$OUT/${RATE}_A.prom")
 
   setphase hold "$RATE"
+  start_probe "$RATE"
   run_loadgen "$RATE" "$HOLD" "$OUT/${RATE}_loadgen.log" || log "!! loadgen 비정상 종료"
+  stop_probe
   b_epoch=$(date +%s)
-  eff=$(grep -oE 'effective_rate=[0-9.]+' "$OUT/${RATE}_loadgen.log" | tail -1 | cut -d= -f2)
+  eff=$(grep -oE 'effective_rate=[0-9.]+' "$OUT/${RATE}_loadgen.log" | tail -1 | cut -d= -f2 || true)   # 줄이 없으면(sim 실패 등) grep 이 1 → pipefail 로 스윕이 죽지 않게; eff 비면 판정 "?"
   log "loadgen 완료. 실효 ≈ ${eff:-?} msg/s"
 
   setphase drain "$RATE"
   "$SCRIPT_DIR/snapshot.sh" "$OUT/${RATE}_B" >/dev/null
-  b_rt=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_B.prom" | grep realtime-group | prom_sum)
-  b_st=$(grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$OUT/${RATE}_B.prom" | grep storage-group | prom_sum)
+  b_rt=$(consumed_total realtime "$OUT/${RATE}_B.prom")
+  b_st=$(consumed_total storage "$OUT/${RATE}_B.prom")
   dt=$((b_epoch - a_epoch)); [ "$dt" -lt 1 ] && dt=1
-  crt=$(awk "BEGIN{printf \"%.0f\",($b_rt-$a_rt)/$dt}")
-  cst=$(awk "BEGIN{printf \"%.0f\",($b_st-$a_st)/$dt}")
+  # a_rt/b_rt 등이 브로커 CLI 재시도까지 실패해 빈 값이면, 0으로 착각해 델타를 내지 않고
+  # NA로 명시한다 (9/21 v2 에서 이 경로가 음수 소비율을 만든 원인).
+  if [ -n "$a_rt" ] && [ -n "$b_rt" ]; then
+    crt=$(awk "BEGIN{printf \"%.0f\",($b_rt-$a_rt)/$dt}")
+  else
+    crt="NA"; log "!! realtime 소비율 측정 실패(브로커 CLI 무응답) — 이 rate 는 NA"
+  fi
+  if [ -n "$a_st" ] && [ -n "$b_st" ]; then
+    cst=$(awk "BEGIN{printf \"%.0f\",($b_st-$a_st)/$dt}")
+  else
+    cst="NA"; log "!! storage 소비율 측정 실패(브로커 CLI 무응답) — 이 rate 는 NA"
+  fi
 
   log "lag 배수 대기 (상한 ${DRAIN_WAIT}s)"
   ds=$(date +%s); drained=timeout
