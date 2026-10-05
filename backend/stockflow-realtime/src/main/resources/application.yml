@@ -40,11 +40,12 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
       timeout: 3000ms
       lettuce:
         pool:
           max-active: 48
-          max-idle: 8
+          max-idle: 48
           min-idle: 2
           max-wait: 2000ms
 

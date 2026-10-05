@@ -69,12 +69,15 @@ services:
     container_name: stockflow-redis
     ports:
       - "127.0.0.1:6379:6379"
-    command: >
-      redis-server
-      --maxmemory 2gb
-      --maxmemory-policy allkeys-lru
-      --save ""
-      --appendonly no
+    environment:
+      # 비어 있으면 인증 없이 기동(로컬 개발). 서버는 backend/infra/.env 에 REDIS_PASSWORD 를 둔다.
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      # 컨테이너 안에서 docker exec ... redis-cli 가 자동으로 인증하게 한다
+      - REDISCLI_AUTH=${REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -c
+      - exec redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru --save "" --appendonly no $${REDIS_PASSWORD:+--requirepass "$$REDIS_PASSWORD"}
 
   # Monitoring UI
   # Kafka UI 는 기본으로 띄우지 않는다(필요할 때만: docker compose --profile kafka-ui up -d kafka-ui).
@@ -227,6 +230,7 @@ services:
       # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       # Database
       - DB_HOST=timescaledb
       - DB_PORT=5432
@@ -306,6 +310,7 @@ services:
       - STOCKFLOW_E2E_SAMPLE_EVERY=${STOCKFLOW_E2E_SAMPLE_EVERY:-1}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - DB_HOST=timescaledb
       - DB_PORT=5432
       - DB_NAME=stockflow
@@ -467,7 +472,7 @@ services:
       EMAIL_URL: consolemail://
       GLITCHTIP_DOMAIN: http://localhost:8000
       DEFAULT_FROM_EMAIL: stockflow@example.com
-      REDIS_URL: redis://redis:6379/2
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/2
       ENABLE_OPEN_USER_REGISTRATION: "true"
       CELERY_WORKER_AUTOSCALE: "1,3"
     restart: unless-stopped
@@ -540,6 +545,7 @@ services:
     profiles: ["metrics"]
     environment:
       - REDIS_ADDR=redis://redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
     ports:
       - "127.0.0.1:9121:9121"
     depends_on:

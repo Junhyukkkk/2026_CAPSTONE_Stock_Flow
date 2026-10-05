@@ -31,6 +31,10 @@ NETWORK=${NETWORK:-infra_default}
 APP_URL=${APP_URL:-http://localhost:8081}
 PAUSE_DURING_BUILD=${PAUSE_DURING_BUILD:-"stockflow-alpaca-collector stockflow-kafka-ui stockflow-redis-insight"}
 
+# 스윕 전에 떠 있던 컨테이너만 되살린다(일부러 꺼 둔 alpaca·kafka-ui 등을 켜지 않게)
+RUNNING_BEFORE=$(docker ps --format '{{.Names}}')
+start_if_was_running() { local c; for c in "$@"; do grep -qx "$c" <<<"$RUNNING_BEFORE" && docker start "$c" >/dev/null 2>&1 || true; done; }
+
 OUT="$SCRIPT_DIR/results/revisions_${LABEL}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUT"
 log() { echo -e "\033[1;35m[$(date +%H:%M:%S)]\033[0m $*"; }
@@ -45,7 +49,7 @@ restore() {
     reset_offsets   # 시험 부하가 남긴 적체를 운영 앱이 떠안지 않게
     docker start "$LIVE" >/dev/null
   fi
-  for c in $PAUSE_DURING_BUILD stockflow-binance-collector; do docker start "$c" >/dev/null 2>&1; done
+  start_if_was_running $PAUSE_DURING_BUILD stockflow-binance-collector
   git -C "$REPO" worktree prune >/dev/null 2>&1
 }
 trap restore EXIT
@@ -117,10 +121,10 @@ for spec in "$@"; do
   elif ! { log "빌드: $img"; DOCKER_BUILDKIT=1 docker build -q -t "$img" -f "$WT/backend/Dockerfile" "$WT/backend" > "$OUT/$short.build.log" 2>&1; }; then
     log "!! 빌드 실패 → $OUT/$short.build.log"
     echo "| $short | $date_ | $subj | FAILED(build) | | |" >> "$OUT/INDEX.md"
-    for c in $PAUSE_DURING_BUILD; do docker start "$c" >/dev/null 2>&1 || true; done
+    start_if_was_running $PAUSE_DURING_BUILD
     continue
   fi
-  for c in $PAUSE_DURING_BUILD; do docker start "$c" >/dev/null 2>&1 || true; done
+  start_if_was_running $PAUSE_DURING_BUILD
 
   # 2. 앱 컨테이너 교체 (처음엔 원래 컨테이너를 BACKUP 이름으로 보관)
   # binance-collector 를 여기서부터 restore() 까지 계속 멈춰둔다 — 안 그러면 컨테이너

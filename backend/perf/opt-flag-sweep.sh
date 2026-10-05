@@ -25,6 +25,8 @@ HOLD=${HOLD:-90}
 DRAIN_WAIT=${DRAIN_WAIT:-90}
 SETTLE=${SETTLE:-10}
 
+BINANCE_WAS_RUNNING=$(docker ps --format '{{.Names}}' | grep -cx stockflow-binance-collector || true)
+
 OUT="$SCRIPT_DIR/results/optflags_${LABEL}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUT"
 log() { echo -e "\033[1;33m[$(date +%H:%M:%S)]\033[0m $*"; }
@@ -38,7 +40,7 @@ restore() {
     reset_offsets
     docker start "$LIVE" >/dev/null
   fi
-  docker start stockflow-binance-collector >/dev/null 2>&1 || true
+  [ "${BINANCE_WAS_RUNNING:-0}" -gt 0 ] && docker start stockflow-binance-collector >/dev/null 2>&1 || true
 }
 trap restore EXIT
 

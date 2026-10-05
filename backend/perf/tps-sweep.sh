@@ -335,7 +335,7 @@ for RATE in $RATES; do
   #   SATURATED: 소비 <  전송*0.8  (뚜렷이 뒤처짐)  또는  종료 후에도 안 빠짐
   #   MARGINAL : 그 사이
   verdict=$(awk -v c="$crt" -v s="${eff:-0}" -v pk="${peak:-0}" -v el="${endl:-0}" -v dr="$drained" 'BEGIN{
-    if(s<=0){print "?"; exit}
+    if(s<=0 || c !~ /^[0-9.]+$/){print "?"; exit}
     if(dr=="timeout" || el>5000 || c < s*0.8) {print "SATURATED"; exit}
     if(c >= s*0.9 && pk < s*8) {print "KEPT_UP"; exit}
     print "MARGINAL"}')
