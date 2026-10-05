@@ -49,4 +49,6 @@ jobs:
             git fetch origin
             git reset --hard origin/main
             cd backend/infra
-            docker compose --profile metrics --profile alpaca up -d --build
+            docker compose --profile metrics up -d --build
+            # 컨테이너가 재생성되면 분석 서비스 코어·메모리 예약이 풀리므로 다시 건다
+            bash ~/capstone/backend/infra/reserve-analysis-capacity.sh || true

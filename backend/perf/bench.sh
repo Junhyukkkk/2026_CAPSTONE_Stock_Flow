@@ -88,7 +88,7 @@ docker run -d --name "$APP" --network "$NETWORK" -p 8081:8081 \
   -e KAFKA_CONSUMER_GROUP_STORAGE=storage-group \
   -e KAFKA_CONSUMER_CONCURRENCY=12 \
   -e KAFKA_CONSUMER_MAX_POLL_RECORDS=100 \
-  -e REDIS_HOST=redis -e REDIS_PORT=6379 \
+  -e REDIS_HOST=redis -e REDIS_PORT=6379 -e REDIS_PASSWORD="${REDIS_PASSWORD:-}" \
   -e DB_HOST=timescaledb -e DB_PORT=5432 -e DB_NAME=stockflow \
   -e DB_USERNAME=postgres -e DB_PASSWORD=postgres \
   -e SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE=16 \
