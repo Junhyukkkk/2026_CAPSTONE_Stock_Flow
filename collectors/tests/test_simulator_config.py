@@ -5,7 +5,7 @@ import pytest
 
 _SIM_KEYS = (
     "SIM_SYMBOLS_FILE", "SIM_TOTAL_TPS", "SIM_MARKET_HOURS", "SIM_SEED",
-    "SIM_DRY_RUN", "SIM_TICK_INTERVAL_MS", "SIM_PRICE_SOURCE",
+    "SIM_DRY_RUN", "SIM_TICK_INTERVAL_MS", "SIM_PRICE_SOURCE", "SIM_RATE_MODE", "SIM_RATE_SCALE",
 )
 
 
@@ -28,6 +28,8 @@ def test_defaults(monkeypatch):
     assert Config.SIM_DRY_RUN is False
     assert Config.SIM_TICK_INTERVAL_MS == 50
     assert Config.SIM_PRICE_SOURCE == "static"
+    assert Config.SIM_RATE_MODE == "realistic"
+    assert Config.SIM_RATE_SCALE == 1.0
     assert Config.validate_simulator() is True
 
 
@@ -45,6 +47,12 @@ def test_valid_overrides(monkeypatch):
 
 
 @pytest.mark.parametrize("env, expected_in_message", [
+    ({"SIM_RATE_MODE": "foo"}, "SIM_RATE_MODE"),
+    ({"SIM_RATE_SCALE": "0"}, "SIM_RATE_SCALE"),
+    ({"SIM_RATE_SCALE": "-0.5"}, "SIM_RATE_SCALE"),
+    ({"SIM_RATE_SCALE": "11"}, "SIM_RATE_SCALE"),
+    ({"SIM_RATE_SCALE": "nan"}, "SIM_RATE_SCALE"),
+    ({"SIM_RATE_SCALE": "abc"}, "SIM_RATE_SCALE"),
     ({"SIM_TOTAL_TPS": "abc"}, "SIM_TOTAL_TPS"),
     ({"SIM_TOTAL_TPS": "0"}, "SIM_TOTAL_TPS"),
     ({"SIM_TOTAL_TPS": "-5"}, "SIM_TOTAL_TPS"),
@@ -80,3 +88,11 @@ def test_invalid_sim_env_does_not_break_regular_validate(monkeypatch):
 
 def test_tick_interval_upper_bound_is_inclusive(monkeypatch):
     assert _load_config(monkeypatch, SIM_TICK_INTERVAL_MS="2000").validate_simulator() is True
+
+
+def test_rate_mode_and_scale_overrides(monkeypatch):
+    Config = _load_config(monkeypatch, SIM_RATE_MODE=" Fixed ", SIM_RATE_SCALE="10")
+    assert Config.SIM_RATE_MODE == "fixed"
+    assert Config.SIM_RATE_SCALE == 10.0
+    assert Config.validate_simulator() is True
+    assert _load_config(monkeypatch, SIM_RATE_SCALE="0.25").SIM_RATE_SCALE == 0.25

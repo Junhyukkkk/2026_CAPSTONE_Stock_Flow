@@ -66,13 +66,34 @@ collectors/
 > 2. 시뮬레이터 종목에 기존 ALPACA 행이 있는지 확인한다: `SELECT DISTINCT symbol FROM symbol_daily_ohlcv WHERE source='ALPACA';`
 > 3. `SIM_PRICE_SOURCE` 는 재시작 사이에 바꾸지 않는다 (static ↔ alpaca 전환 시 가격이 0.2~5배 점프할 수 있다).
 
-### 운영 부하
-체결마다 Redis 멱등성 키(현재 코드 기본 TTL 24시간)와 DB 행이 하나씩 생긴다. 300 ticks/s 로 24시간 돌리면 하루 약 2,600만 건이라
-압축 전 기준 하루 수 GB 의 Redis 키·디스크가 필요하다. 라이브 스택에서는 낮은 TPS 와/또는 `SIM_MARKET_HOURS=us` 를 권장한다.
-이 때문에 **compose 의 `SIM_TOTAL_TPS` 기본값은 `100`** 이고(`backend/infra`·`collectors` 두 compose 모두), 환경 변수 없이
-`python stock_simulator.py` 로 직접 실행할 때의 코드 기본값만 `300` 이다.
+### 발생률 모드 (`SIM_RATE_MODE`)
+- **`realistic`(코드 기본값)** — 종목별 하루 평균 통합 체결 건수 `daily_trades`(`universe.csv` 선택 컬럼, 근사치)로 발생률을 정한다.
+  종목 i 의 순간 발생률 = `daily_trades_i / 23400 × SIM_RATE_SCALE × profile(t)` (23400 = 정규장 6.5시간 초, 도착은 구간별 포아송).
+  `SIM_TOTAL_TPS` 는 쓰이지 않으며 시작 로그에 "SIM_TOTAL_TPS 무시됨"과 계산된 합계 평균 TPS 가 출력된다.
+  - 번들 105종목 합계 약 **1,948만 건/일 → 평균 약 832 TPS** (`SIM_RATE_SCALE=1`). 종목 하나가 하루 수십만~백만+ 건
+    (NVDA 150만, TSLA 130만, SPY 120만, QQQ 90만, AAPL 90만 …)이고 중형·방어주는 4만~12만 건이다.
+  - `SIM_MARKET_HOURS=us`: 정규장 안에서 U자 강도 곡선 `profile(t)` 를 곱한다 (개장 직후 약 2.9배 → 30분 뒤 약 1.4배 → 정오 약 0.6배 →
+    마감 직전 약 2.4배, 꼭짓점 사이 선형 보간, 장 전체 평균이 정확히 1.0 이 되도록 정규화). 장외·주말은 0.
+  - `SIM_MARKET_HOURS=always`: 곡선 없이 평균(profile=1)으로 24시간 일정하게 만든다(한국 시간 낮에도 데이터가 나온다).
+    **같은 `SIM_RATE_SCALE` 이라도 24시간 흐르므로 `us` 모드(약 6.5시간)의 약 3.7배 건수**(scale 1 ≈ 7,190만 건/일)다.
+  - `daily_trades` 가 비었거나 숫자가 아닌/0 이하인 행은 그 값만 무시하고 `weight × 10,000` 건/일로 폴백한다(컬럼이 없는 구형 CSV 도 동작).
+- **`fixed`** — 기존 동작. `SIM_TOTAL_TPS` 를 `weight` 비례로 나눠 항상 일정하게 낸다(강도 곡선·`daily_trades` 미사용).
 
-기본 `always` 모드는 변동성을 거래 초당 기준으로 스케일하면서 24시간 내내 돌기 때문에 일봉 변동성이 현실의 약 2배다.
+체결 간 변동성은 평균 도착 간격으로 환산되므로 체결이 많은 종목일수록 틱당 변동폭이 작고, `SIM_RATE_SCALE` 을 바꿔도
+하루 합산 변동성은 종목 `volatility` 수준(일간 수익률 표준편차 ≈ `volatility/√252`)으로 유지된다. realistic + `always` 는 24시간 기준으로
+환산하므로 (fixed + always 와 달리) 일 변동성이 2배로 부풀지 않는다. 장중 변동성은 거래 강도에 비례해 개장·마감 직후 커진다.
+
+### 운영 부하 (용량 안내)
+> ⚠️ **realistic · scale 1.0 은 서버에 부담이 크다.** 105종목 합계 평균 약 **832 TPS**(하루 약 2,000만 건, `always` 면 약 7,000만 건)다.
+> 체결마다 Redis 멱등성 키(현재 코드 기본 TTL 24시간)와 DB 행이 하나씩 생겨, 압축 전 기준 DB 가 하루 수 GB 씩 늘고
+> Redis 멱등성 키가 메모리 한계를 넘어 축출될 위험이 있다. **서버에 올릴 때는 `SIM_RATE_SCALE` 로 낮추거나
+> 저장 경로 최적화(멱등성 키 TTL 단축 등)를 먼저 적용할 것.**
+
+compose(`backend/infra`·`collectors`)의 기본값은 `SIM_RATE_MODE=realistic`, **`SIM_RATE_SCALE=0.25`**(서버 보호용 기본값, 합계 평균 약 208 TPS)이다.
+`SIM_TOTAL_TPS`(compose 기본 `100`, 코드 기본 `300`)는 `fixed` 모드 전용이다. 기본 `SIM_MARKET_HOURS=always` + scale 0.25 이면 하루 약 1,800만 건이므로
+라이브 스택에서는 `SIM_RATE_SCALE` 을 더 낮추거나 `SIM_MARKET_HOURS=us` 를 권장한다.
+
+`fixed` + `always` 는 변동성을 거래 초당 기준으로 스케일하면서 24시간 내내 돌기 때문에 일봉 변동성이 현실의 약 2배다(`realistic` 은 이 한계가 없다).
 시뮬레이션 데이터의 지표·백테스트는 의미가 없다.
 
 ### 실행
@@ -83,20 +104,23 @@ collectors/
 docker compose --profile sim up -d stock-simulator
 
 # 로컬 dry-run: Kafka 없이 stdout 에 JSON 한 줄씩 출력 (로그는 stderr)
-SIM_DRY_RUN=true SIM_SEED=1 SIM_TOTAL_TPS=50 python stock_simulator.py
+SIM_DRY_RUN=true SIM_SEED=1 SIM_RATE_MODE=realistic SIM_RATE_SCALE=0.1 python stock_simulator.py
+# 고정 발생률: SIM_RATE_MODE=fixed SIM_TOTAL_TPS=50
 ```
 
 ### 주요 환경 변수
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `SIM_TOTAL_TPS` | `300` (compose 는 `100`) | 전 종목 합계 초당 체결 수 (종목별 빈도는 `weight` 비례, 포아송 도착) |
+| `SIM_RATE_MODE` | `realistic` | `realistic`(종목별 `daily_trades` 기반 실제 체결량, `us` 에서 U자 강도 곡선) 또는 `fixed`(기존 `SIM_TOTAL_TPS`) |
+| `SIM_RATE_SCALE` | `1.0` (compose 는 `0.25`) | realistic 발생률 배율 (0 초과 10 이하) — 서버 용량에 맞춰 줄이는 용도 |
+| `SIM_TOTAL_TPS` | `300` (compose 는 `100`) | **`fixed` 모드 전용** 전 종목 합계 초당 체결 수 (종목별 빈도는 `weight` 비례, 포아송 도착) |
 | `SIM_MARKET_HOURS` | `always` | `always` 또는 `us` (`us` = 미국 동부시간 월~금 09:30~16:00 에만 전송, 휴장일 미반영) |
 | `SIM_PRICE_SOURCE` | `static` | 시작가 출처. `static`=CSV 그대로, `alpaca`=Alpaca 스냅샷의 최신 체결가, `auto`=키가 있으면 alpaca 시도 |
 | `SIM_SEED` | (없음) | 지정하면 같은 가격·수량 시퀀스 재현 (`tradeId` 의 run_id 는 기동마다 다름) |
 | `SIM_DRY_RUN` | `false` | `true` 면 Kafka 대신 stdout 에 출력 |
 | `SIM_TICK_INTERVAL_MS` | `50` | 체결 생성 스케줄러 간격 (1~2000) |
-| `SIM_SYMBOLS_FILE` | `simulator/universe.csv` | 종목 CSV (`symbol,price,volatility,weight`) |
+| `SIM_SYMBOLS_FILE` | `simulator/universe.csv` | 종목 CSV (`symbol,price,volatility,weight[,daily_trades]`) |
 | `ALPACA_API_KEY` / `ALPACA_API_SECRET` | (없음) | 시작가 읽기용(선택). 체결 전송에는 쓰이지 않는다 |
 
 ### 시작가 로더 (`SIM_PRICE_SOURCE`)

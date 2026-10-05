@@ -42,6 +42,8 @@ class StockSimulator:
         market_hours: str = 'always',
         seed: Optional[int] = None,
         tick_interval_ms: int = 50,
+        rate_mode: str = 'fixed',
+        rate_scale: float = 1.0,
         dry_run: bool = False,
         producer=None,
         clock: Callable[[], float] = time.time,
@@ -53,7 +55,11 @@ class StockSimulator:
         self._producer = producer
         # 무작위 접미사는 시드 RNG 와 무관한 secrets 로 — 같은 ms 에 동시에 기동해도 tradeId 가 겹치지 않는다
         run_id = to_base36(int(clock() * 1000)) + ''.join(secrets.choice(BASE36) for _ in range(4))
-        self._generator = TradeGenerator(instruments, total_tps, run_id=run_id, seed=seed)
+        self._generator = TradeGenerator(
+            instruments, total_tps, run_id=run_id, seed=seed,
+            rate_mode=rate_mode, rate_scale=rate_scale, market_hours=market_hours,
+        )
+        self.expected_tps = self._generator.expected_tps
         self._last_tick = clock()
         self._last_health_write = 0.0
         self.running = True
@@ -178,6 +184,8 @@ async def main():
         market_hours=Config.SIM_MARKET_HOURS,
         seed=Config.SIM_SEED,
         tick_interval_ms=Config.SIM_TICK_INTERVAL_MS,
+        rate_mode=Config.SIM_RATE_MODE,
+        rate_scale=Config.SIM_RATE_SCALE,
         dry_run=Config.SIM_DRY_RUN,
         producer=producer,
     )
@@ -185,9 +193,16 @@ async def main():
     signal.signal(signal.SIGTERM, simulator.stop)
 
     mode = 'dry-run(stdout)' if Config.SIM_DRY_RUN else f'Kafka({Config.KAFKA_TOPIC_NAME})'
+    if Config.SIM_RATE_MODE == 'realistic':
+        rate_desc = (
+            f"발생률: realistic ×{Config.SIM_RATE_SCALE:g} (SIM_TOTAL_TPS 무시됨) | "
+            f"합계 평균 TPS: {simulator.expected_tps:,.1f}"
+        )
+    else:
+        rate_desc = f"발생률: fixed | 총 TPS: {Config.SIM_TOTAL_TPS:g}"
     logger.info(
         f"🚀 주식 시뮬레이터 시작 (시뮬레이션 데이터 — 실제 시세 아님) | "
-        f"source={SOURCE} | 종목: {len(instruments)}개 | 총 TPS: {Config.SIM_TOTAL_TPS:g} | "
+        f"source={SOURCE} | 종목: {len(instruments)}개 | {rate_desc} | "
         f"장 시간: {Config.SIM_MARKET_HOURS} | 모드: {mode} | seed: {Config.SIM_SEED}"
     )
 

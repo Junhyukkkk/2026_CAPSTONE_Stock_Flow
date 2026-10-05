@@ -74,6 +74,8 @@ class Config:
     # 주식 시뮬레이터 설정 (stock_simulator.py) — 생성되는 체결은 모두 가짜 데이터(source=SIMULATOR)
     SIM_SYMBOLS_FILE: str = os.getenv('SIM_SYMBOLS_FILE', 'simulator/universe.csv')
     SIM_TOTAL_TPS: float = _sim_env('SIM_TOTAL_TPS', 300.0, float)  # 전 종목 합계 초당 체결 수
+    SIM_RATE_MODE: str = os.getenv('SIM_RATE_MODE', 'realistic').strip().lower()  # realistic | fixed
+    SIM_RATE_SCALE: float = _sim_env('SIM_RATE_SCALE', 1.0, float)  # realistic 발생률 배율
     SIM_MARKET_HOURS: str = os.getenv('SIM_MARKET_HOURS', 'always').strip().lower()  # always | us
     SIM_SEED: Optional[int] = _sim_env('SIM_SEED', None, int)
     SIM_DRY_RUN: bool = _sim_env('SIM_DRY_RUN', False, _parse_bool)
@@ -142,6 +144,10 @@ class Config:
             errors.append("SIM_SYMBOLS_FILE이 비어 있습니다")
         if not (math.isfinite(cls.SIM_TOTAL_TPS) and cls.SIM_TOTAL_TPS > 0):
             errors.append(f"SIM_TOTAL_TPS는 0보다 큰 유한한 수여야 합니다 (현재: {cls.SIM_TOTAL_TPS})")
+        if cls.SIM_RATE_MODE not in ('realistic', 'fixed'):
+            errors.append(f"SIM_RATE_MODE는 realistic 또는 fixed 여야 합니다 (현재: {cls.SIM_RATE_MODE!r})")
+        if not (math.isfinite(cls.SIM_RATE_SCALE) and 0 < cls.SIM_RATE_SCALE <= 10):
+            errors.append(f"SIM_RATE_SCALE은 0 초과 10 이하여야 합니다 (현재: {cls.SIM_RATE_SCALE})")
         if cls.SIM_MARKET_HOURS not in ('always', 'us'):
             errors.append(f"SIM_MARKET_HOURS는 always 또는 us 여야 합니다 (현재: {cls.SIM_MARKET_HOURS!r})")
         # 한 번에 따라잡는 최대 구간이 2초라 그보다 긴 틱 간격은 체결을 조용히 덜 만든다
