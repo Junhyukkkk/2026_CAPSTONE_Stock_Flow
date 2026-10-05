@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -41,15 +42,18 @@ public class IntradayOhlcvService {
      */
     private static final Duration TOP_UP_WINDOW = Duration.ofMinutes(30);
 
+    /** SQL 의 {@code @SRC@} 자리에 들어갈 출처 조건. 값은 항상 바인드 파라미터로 넘긴다. */
+    private static final String SOURCE_PREDICATE = " AND source = ?";
+
     private static final String SQL = """
             WITH last_candle AS (
                 SELECT coalesce(max(bucket) + interval '1 minute', CAST(? AS timestamptz)) AS cutoff
                 FROM ohlcv_1m
-                WHERE symbol = ? AND bucket >= ? AND bucket < ?
+                WHERE symbol = ?@SRC@ AND bucket >= ? AND bucket < ?
             ), minutes AS (
                 SELECT bucket, open, high, low, close, volume, trade_count
                 FROM ohlcv_1m
-                WHERE symbol = ? AND bucket >= ? AND bucket < ?
+                WHERE symbol = ?@SRC@ AND bucket >= ? AND bucket < ?
                 UNION ALL
                 SELECT date_trunc('minute', t.ts)                AS bucket,
                        (array_agg(t.price ORDER BY t.ts ASC))[1]  AS open,
@@ -60,7 +64,7 @@ public class IntradayOhlcvService {
                        count(*)                                   AS trade_count
                 FROM market_ticks t, last_candle l
                 -- 고정 하한(? = 보충 시작)이 있어야 청크 제외가 된다. cutoff 만 쓰면 원본 틱 전체(83GB)를 훑는다.
-                WHERE t.symbol = ? AND t.ts >= ? AND t.ts >= l.cutoff AND t.ts < ?
+                WHERE t.symbol = ?@SRC@ AND t.ts >= ? AND t.ts >= l.cutoff AND t.ts < ?
                 GROUP BY 1
             )
             SELECT to_timestamp(floor(extract(epoch FROM bucket) / ?) * ?) AS bucket,
@@ -80,6 +84,15 @@ public class IntradayOhlcvService {
     private final JdbcTemplate jdbcTemplate;
 
     public List<IntradayOhlcvResponse> getIntraday(String symbol, String interval, Instant from, Instant to) {
+        return getIntraday(symbol, interval, from, to, null);
+    }
+
+    /**
+     * @param source 데이터 출처(ohlcv_1m/market_ticks 의 source, 예: ALPACA·SIMULATOR·BINANCE). null/blank 면 출처 무관.
+     *               같은 심볼이 여러 출처로 저장될 수 있어, 지정하지 않으면 출처가 한 캔들에 섞인다.
+     */
+    public List<IntradayOhlcvResponse> getIntraday(String symbol, String interval, Instant from, Instant to,
+                                                   String source) {
         Integer bucketSeconds = INTERVAL_SECONDS.get(interval);
         if (bucketSeconds == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -101,8 +114,17 @@ public class IntradayOhlcvService {
         Timestamp endTs = Timestamp.from(end);
         Instant topUpFrom = end.minus(TOP_UP_WINDOW);
         Timestamp topUpFromTs = Timestamp.from(topUpFrom.isAfter(start) ? topUpFrom : start);
+        String upperSource = source == null || source.isBlank() ? null : source.trim().toUpperCase();
+        String sql = SQL.replace("@SRC@", upperSource == null ? "" : SOURCE_PREDICATE);
+        List<Object> args = new ArrayList<>();
+        args.add(startTs);
+        addSymbolArgs(args, upperSymbol, upperSource, startTs, endTs);      // last_candle 는 cutoff 기본값이 앞에 온다
+        addSymbolArgs(args, upperSymbol, upperSource, startTs, endTs);      // ohlcv_1m
+        addSymbolArgs(args, upperSymbol, upperSource, topUpFromTs, endTs);  // market_ticks 보충
+        args.add(bucketSeconds);
+        args.add(bucketSeconds);
         return jdbcTemplate.query(
-                SQL,
+                sql,
                 (rs, rowNum) -> IntradayOhlcvResponse.builder()
                         .symbol(upperSymbol)
                         .time(rs.getTimestamp("bucket").toInstant())
@@ -113,10 +135,16 @@ public class IntradayOhlcvService {
                         .volume(rs.getBigDecimal("volume"))
                         .tickCount(rs.getObject("tick_count", Long.class))
                         .build(),
-                startTs, upperSymbol, startTs, endTs,      // last_candle
-                upperSymbol, startTs, endTs,               // ohlcv_1m
-                upperSymbol, topUpFromTs, endTs,           // market_ticks 보충
-                bucketSeconds, bucketSeconds
+                args.toArray()
         );
+    }
+
+    private static void addSymbolArgs(List<Object> args, String symbol, String source, Timestamp from, Timestamp to) {
+        args.add(symbol);
+        if (source != null) {
+            args.add(source);
+        }
+        args.add(from);
+        args.add(to);
     }
 }

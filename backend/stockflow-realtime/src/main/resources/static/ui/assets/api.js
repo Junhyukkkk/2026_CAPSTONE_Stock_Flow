@@ -41,9 +41,10 @@ const API = {
     stock: (symbol) => API.get(`/api/stocks/${encodeURIComponent(symbol)}`),
     ohlcv: (symbol, from, to) =>
         API.get(`/api/stocks/${encodeURIComponent(symbol)}/ohlcv?from=${from}&to=${to}`),
-    intraday: (symbol, interval, from, to) =>
+    intraday: (symbol, interval, from, to, source) =>
         API.get(`/api/stocks/${encodeURIComponent(symbol)}/intraday?interval=${interval}`
-            + `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+            + `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+            + (source ? `&source=${encodeURIComponent(source)}` : '')),
     indicators: (symbol, from, to) =>
         API.get(`/api/stocks/${encodeURIComponent(symbol)}/indicators?from=${from}&to=${to}`),
     latestPrice: (symbol) => API.get(`/api/price/${encodeURIComponent(symbol)}`),
@@ -78,8 +79,9 @@ const API = {
     runTrades: (runId) => API.get(`/api/backtest/runs/${runId}/trades`),
     equityCurve: (runId) => API.get(`/api/backtest/runs/${runId}/equity-curve`),
     predictionPoints: (runId) => API.get(`/api/backtest/runs/${runId}/prediction-points`),
-    predictionCompare: (symbol, interval, horizon) =>
-        API.get(`/api/predictions/${encodeURIComponent(symbol)}/compare?interval=${interval}&horizon=${horizon}`),
+    predictionCompare: (symbol, interval, horizon, source) =>
+        API.get(`/api/predictions/${encodeURIComponent(symbol)}/compare?interval=${interval}&horizon=${horizon}`
+            + (source ? `&source=${encodeURIComponent(source)}` : '')),
 };
 
 // ---- 포맷 헬퍼 ----

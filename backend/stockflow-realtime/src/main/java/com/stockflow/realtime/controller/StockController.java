@@ -108,9 +108,11 @@ public class StockController {
             @Parameter(description = "시작 시각 (ISO-8601, 예: 2026-06-05T00:00:00Z). 미지정 시 to-1일")
             @RequestParam(required = false) Instant from,
             @Parameter(description = "종료 시각 (ISO-8601). 미지정 시 현재")
-            @RequestParam(required = false) Instant to
+            @RequestParam(required = false) Instant to,
+            @Parameter(description = "데이터 출처 (예: ALPACA, SIMULATOR, BINANCE). 같은 심볼이 여러 출처로 저장될 때 지정. 미지정 시 출처 무관")
+            @RequestParam(required = false) String source
     ) {
-        return intradayOhlcvService.getIntraday(symbol, interval, from, to);
+        return intradayOhlcvService.getIntraday(symbol, interval, from, to, source);
     }
 
     @GetMapping("/{symbol}/indicators")
