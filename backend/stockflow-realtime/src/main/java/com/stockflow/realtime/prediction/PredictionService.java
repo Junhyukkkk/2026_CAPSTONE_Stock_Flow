@@ -1,6 +1,7 @@
 package com.stockflow.realtime.prediction;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -13,16 +14,23 @@ import org.springframework.web.client.RestClientResponseException;
 import java.time.Duration;
 import java.util.Optional;
 
+@Slf4j
 @Service
 public class PredictionService {
 
     private final RestClient client;
+    private final PredictionHistoryRecorder historyRecorder;
+    private final boolean historyEnabled;
 
     public PredictionService(
             RestClient.Builder builder,
             @Value("${analysis.base-url}") String baseUrl,
             @Value("${analysis.connect-timeout-ms:3000}") int connectTimeoutMs,
-            @Value("${analysis.read-timeout-ms:120000}") int readTimeoutMs) {
+            @Value("${analysis.read-timeout-ms:120000}") int readTimeoutMs,
+            PredictionHistoryRecorder historyRecorder,
+            @Value("${prediction.history.enabled:true}") boolean historyEnabled) {
+        this.historyRecorder = historyRecorder;
+        this.historyEnabled = historyEnabled;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
         requestFactory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
@@ -34,6 +42,7 @@ public class PredictionService {
 
     public JsonNode compare(String symbol, String interval, int horizon, String source) {
         try {
+            long startedNanos = System.nanoTime();
             JsonNode response = client.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/predict/{symbol}/compare")
@@ -48,6 +57,8 @@ public class PredictionService {
                 throw new PredictionServiceException(
                         HttpStatus.BAD_GATEWAY, "예측 서비스가 빈 응답을 반환했습니다.");
             }
+            recordHistory(symbol, interval, horizon, source, response,
+                    (System.nanoTime() - startedNanos) / 1_000_000L);
             return response;
         } catch (HttpClientErrorException.NotFound e) {
             throw new PredictionServiceException(
@@ -58,6 +69,19 @@ public class PredictionService {
         } catch (RestClientException e) {
             throw new PredictionServiceException(
                     HttpStatus.SERVICE_UNAVAILABLE, "예측 서비스에 연결할 수 없습니다.", e);
+        }
+    }
+
+    /** 저장은 부가 기능이므로 어떤 실패도 compare 응답에 영향을 주지 않는다. */
+    private void recordHistory(String symbol, String interval, int horizon, String source,
+                               JsonNode response, long latencyMs) {
+        if (!historyEnabled) {
+            return;
+        }
+        try {
+            historyRecorder.record(symbol, interval, horizon, source, response, latencyMs);
+        } catch (RuntimeException e) {
+            log.warn("예측 이력 저장 요청 실패(무시): symbol={} interval={}", symbol, interval, e);
         }
     }
 
