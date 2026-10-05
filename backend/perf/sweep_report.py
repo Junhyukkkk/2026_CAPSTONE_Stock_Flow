@@ -84,19 +84,39 @@ print(f'| 코드 리비전 | {gitrev.group(1) if gitrev else "?"} |')
 print(f'| 구간 계측(stage_seconds) | {"있음" if stage_present else "**없음 (구버전 — git pull 후 재빌드 필요)**"} |')
 print()
 
+def numf(s):
+    # tps-sweep.sh 가 브로커 CLI 무응답으로 측정을 못 하면 "NA" 문자열을 쓴다
+    # (0 으로 착각해 델타를 내면 음수로 튀는 문제가 있었음, 9/21 v2). float() 로
+    # 그대로 캐스팅하면 크래시하므로 여기서 NA 는 NA 로 통과시킨다.
+    try:
+        return f'{float(s):,.0f}'
+    except ValueError:
+        return s
+
 print('## rate 스윕\n')
 print('| 목표 rate | 실효 전송 | 소비(realtime) | 소비(storage) | peak lag | 배수 | 판정 |')
 print('| ---: | ---: | ---: | ---: | ---: | ---: | :--- |')
 for r in rows:
     dr = r['drain_s']
     dr = f'{dr}s' if dr.isdigit() else dr
-    print(f"| {r['rate']} | {float(r['effective_send']):,.0f} | {float(r['consume_realtime']):,.0f} | "
-          f"{float(r['consume_storage']):,.0f} | {float(r['peak_lag_rt']):,.0f} | {dr} | {r['verdict']} |")
+    print(f"| {r['rate']} | {numf(r['effective_send'])} | {numf(r['consume_realtime'])} | "
+          f"{numf(r['consume_storage'])} | {numf(r['peak_lag_rt'])} | {dr} | {r['verdict']} |")
 print()
 
 def lo(xs, col):
     vals = [float(x[col]) for x in xs if x.get(col) not in (None, '', 'nan')]
     return min(vals) if vals else 0.0
+
+
+def redis_evicted(text):
+    # snapshot.sh 는 redis-cli INFO 가 타임아웃/실패하면 파일에 "(redis 실패)" 라고만 쓴다.
+    # redis_field 가 못 찾으면 None 인데, 예전엔 `or 0` 으로 0 취급해서 A는 성공(수천만)·
+    # B는 실패(0 취급)인 경우 델타가 수천만 음수로 튀었다(9/21 v2, -6100만 등). None 은
+    # None 으로 남겨 호출부가 "모름"으로 취급하게 한다.
+    if '실패' in text:
+        return None
+    v = redis_field(text, 'evicted_keys')
+    return float(v) if v is not None else None
 
 
 print('## 구간별 자원 상태 (부하 중 피크)\n')
@@ -105,13 +125,55 @@ print('| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
 for r in rows:
     rate = r['rate']
     xs = hold_window(rate)
-    ev_a = float(redis_field(read(f'{OUT}/{rate}_A.redis'), 'evicted_keys') or 0)
-    ev_b = float(redis_field(read(f'{OUT}/{rate}_B.redis'), 'evicted_keys') or 0)
+    ev_a = redis_evicted(read(f'{OUT}/{rate}_A.redis'))
+    ev_b = redis_evicted(read(f'{OUT}/{rate}_B.redis'))
+    ev_delta = f'{ev_b - ev_a:,.0f}' if ev_a is not None and ev_b is not None else 'NA'
     hp = prom_val(read(f'{OUT}/{rate}_B.prom'), 'hikaricp_connections_pending') or 0
-    print(f"| {rate} | {peak(xs,'cpu_app'):.0f}% | {peak(xs,'cpu_kafka'):.0f}% | {peak(xs,'cpu_redis'):.0f}% | "
-          f"{peak(xs,'cpu_pg'):.0f}% | {peak(xs,'load1'):.1f} | {lo(xs,'mem_free_mb'):.0f}MB | "
-          f"{peak(xs,'swap_used_mb'):.0f}MB | {ev_b-ev_a:,.0f} | {hp:.0f} |")
+    cpu_cols = [peak(xs, c) for c in ('cpu_app', 'cpu_kafka', 'cpu_redis', 'cpu_pg')]
+    # 자원 샘플러가 그 구간 내내(모든 표본) 실패해 4개 CPU 열이 동시에 0 이면 실제 0%가
+    # 아니라 측정 자체가 안 된 것이다(호스트 과부하로 docker stats 까지 응답 못한 경우,
+    # 9/21 v2 rate>=8000 구간에서 관측). 진짜 유휴 CPU와 구분해 NA로 표시한다.
+    cpu_txt = ['NA'] * 4 if not xs or all(v == 0 for v in cpu_cols) else [f'{v:.0f}%' for v in cpu_cols]
+    print(f"| {rate} | {cpu_txt[0]} | {cpu_txt[1]} | {cpu_txt[2]} | {cpu_txt[3]} | "
+          f"{peak(xs,'load1'):.1f} | {lo(xs,'mem_free_mb'):.0f}MB | "
+          f"{peak(xs,'swap_used_mb'):.0f}MB | {ev_delta} | {hp:.0f} |")
 print()
+
+def probe_table():
+    # tps-sweep.sh 의 ANALYSIS_PROBE=1 결과. 파일이 없으면 아무것도 출력하지 않는다(기존 출력 유지).
+    path = f'{OUT}/analysis_probe.csv'
+    if not os.path.exists(path):
+        return
+    by_rate = {}
+    for r in csv.DictReader(open(path, encoding='utf-8', errors='replace')):
+        by_rate.setdefault((r.get('rate') or '').strip(), []).append(r)
+    order = [r['rate'] for r in rows if r['rate'] in by_rate]
+    order += sorted((k for k in by_rate if k not in order), key=lambda k: (not k.isdigit(), int(k) if k.isdigit() else 0, k))
+    print('## 분석 API 응답시간 (`/api/predictions/<SYM>/compare`)\n')
+    print('| rate | 호출 | 성공(200) | 실패 | 최소 s | 중앙값 s | 최대 s |')
+    print('| ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
+    for rate in order:
+        calls = by_rate[rate]
+        ok_secs = []
+        for c in calls:
+            try:
+                if (c.get('http') or '').strip() == '200':
+                    ok_secs.append(float(c.get('seconds')))
+            except (TypeError, ValueError):
+                pass  # 200 인데 시간이 비었거나 깨진 행은 시간 통계에서만 제외
+        nok = sum(1 for c in calls if (c.get('http') or '').strip() == '200')
+        if ok_secs:
+            ok_secs.sort()
+            mid = len(ok_secs) // 2
+            med = ok_secs[mid] if len(ok_secs) % 2 else (ok_secs[mid - 1] + ok_secs[mid]) / 2
+            stats = f'{ok_secs[0]:.3f} | {med:.3f} | {ok_secs[-1]:.3f}'
+        else:
+            stats = 'NA | NA | NA'
+        print(f'| {rate} | {len(calls)} | {nok} | {len(calls) - nok} | {stats} |')
+    print('\n시간 통계는 성공(HTTP 200) 호출만 대상. 실패 = 200 이 아닌 응답(000 = 연결 실패/타임아웃 120s 포함).\n')
+
+
+probe_table()
 
 kept = [r for r in rows if r['verdict'] == 'KEPT_UP']
 sat = [r for r in rows if r['verdict'] == 'SATURATED']
@@ -136,8 +198,9 @@ if first_sat:
         cand.append(f"Redis CPU 포화 ({peak(xs,'cpu_redis'):.0f}%)")
     if peak(xs, 'cpu_pg') > 85:
         cand.append(f"TimescaleDB CPU 포화 ({peak(xs,'cpu_pg'):.0f}%)")
-    a = read(f'{OUT}/{first_sat}_A.redis'); b = read(f'{OUT}/{first_sat}_B.redis')
-    if float(redis_field(b, 'evicted_keys') or 0) - float(redis_field(a, 'evicted_keys') or 0) > 1000:
+    ev_a0 = redis_evicted(read(f'{OUT}/{first_sat}_A.redis'))
+    ev_b0 = redis_evicted(read(f'{OUT}/{first_sat}_B.redis'))
+    if ev_a0 is not None and ev_b0 is not None and ev_b0 - ev_a0 > 1000:
         cand.append('Redis maxmemory 도달 → 키 축출 (멱등성 키 누적)')
     if (prom_val(read(f'{OUT}/{first_sat}_B.prom'), 'hikaricp_connections_pending') or 0) > 0:
         cand.append('Hikari 커넥션 풀 대기 (DB 저장 경로)')

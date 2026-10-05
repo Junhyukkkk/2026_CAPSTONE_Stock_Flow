@@ -237,7 +237,7 @@ class StockServicesTest {
 
     @Test
     void intradayRejectsBadIntervalAndRanges() {
-        IntradayOhlcvService service = new IntradayOhlcvService(jdbc);
+        IntradayOhlcvService service = new IntradayOhlcvService(jdbc, mock(SymbolSourceResolver.class));
         Instant from = Instant.parse("2025-01-01T00:00:00Z");
 
         assertThatThrownBy(() -> service.getIntraday("btc", "2m", from, from.plusSeconds(60)))
@@ -253,7 +253,7 @@ class StockServicesTest {
 
     @Test
     void intradayQueriesWithBucketSecondsAndMapsRows() {
-        IntradayOhlcvService service = new IntradayOhlcvService(jdbc);
+        IntradayOhlcvService service = new IntradayOhlcvService(jdbc, mock(SymbolSourceResolver.class));
         Instant from = Instant.parse("2025-01-01T00:00:00Z");
         Map<String, Object> row = new HashMap<>();
         row.put("bucket", from);
@@ -278,7 +278,7 @@ class StockServicesTest {
 
     @Test
     void intradayDefaultsToLastDayAndClampsTopUpWindow() {
-        IntradayOhlcvService service = new IntradayOhlcvService(jdbc);
+        IntradayOhlcvService service = new IntradayOhlcvService(jdbc, mock(SymbolSourceResolver.class));
         stubRows(List.of());
 
         assertThat(service.getIntraday("btc", "1h", null, null)).isEmpty();

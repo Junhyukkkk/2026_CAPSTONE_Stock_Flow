@@ -69,12 +69,15 @@ services:
     container_name: stockflow-redis
     ports:
       - "127.0.0.1:6379:6379"
-    command: >
-      redis-server
-      --maxmemory 2gb
-      --maxmemory-policy allkeys-lru
-      --save ""
-      --appendonly no
+    environment:
+      # 비어 있으면 인증 없이 기동(로컬 개발). 서버는 backend/infra/.env 에 REDIS_PASSWORD 를 둔다.
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      # 컨테이너 안에서 docker exec ... redis-cli 가 자동으로 인증하게 한다
+      - REDISCLI_AUTH=${REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -c
+      - exec redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru --save "" --appendonly no $${REDIS_PASSWORD:+--requirepass "$$REDIS_PASSWORD"}
 
   # Monitoring UI
   # Kafka UI 는 기본으로 띄우지 않는다(필요할 때만: docker compose --profile kafka-ui up -d kafka-ui).
@@ -216,9 +219,18 @@ services:
       - STOCKFLOW_OPT_WS_TASK_EXECUTOR=${STOCKFLOW_OPT_WS_TASK_EXECUTOR:-true}
       - STOCKFLOW_OPT_REDIS_PIPELINE=${STOCKFLOW_OPT_REDIS_PIPELINE:-true}
       - STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=${STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE:-true}
+      - STOCKFLOW_OPT_REALTIME_BATCH=${STOCKFLOW_OPT_REALTIME_BATCH:-false}
+      # 저장 경로 튜닝 — 서버 측정으로 검증된 기본값 (옛 동작으로 되돌리려면 TTL=86400, KAFKA_STORAGE_*=100/1/500)
+      - STOCKFLOW_IDEMPOTENCY_TTL_SECONDS=${STOCKFLOW_IDEMPOTENCY_TTL_SECONDS:-600}
+      - KAFKA_STORAGE_MAX_POLL_RECORDS=${KAFKA_STORAGE_MAX_POLL_RECORDS:-500}
+      - KAFKA_STORAGE_FETCH_MIN_BYTES=${KAFKA_STORAGE_FETCH_MIN_BYTES:-65536}
+      - KAFKA_STORAGE_FETCH_MAX_WAIT_MS=${KAFKA_STORAGE_FETCH_MAX_WAIT_MS:-100}
+      - REDIS_PIPELINE_FLUSH=${REDIS_PIPELINE_FLUSH:-each}
+      - STOCKFLOW_E2E_SAMPLE_EVERY=${STOCKFLOW_E2E_SAMPLE_EVERY:-1}
       # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       # Database
       - DB_HOST=timescaledb
       - DB_PORT=5432
@@ -289,8 +301,16 @@ services:
       - BATCH_SCHEDULER_ENABLED=true
       - STOCKFLOW_OPT_INSTRUMENT_CACHE=${STOCKFLOW_OPT_INSTRUMENT_CACHE:-true}
       - STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=${STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE:-true}
+      # 저장 경로 튜닝 — 서버 측정으로 검증된 기본값 (옛 동작으로 되돌리려면 TTL=86400, KAFKA_STORAGE_*=100/1/500)
+      - STOCKFLOW_IDEMPOTENCY_TTL_SECONDS=${STOCKFLOW_IDEMPOTENCY_TTL_SECONDS:-600}
+      - KAFKA_STORAGE_MAX_POLL_RECORDS=${KAFKA_STORAGE_MAX_POLL_RECORDS:-500}
+      - KAFKA_STORAGE_FETCH_MIN_BYTES=${KAFKA_STORAGE_FETCH_MIN_BYTES:-65536}
+      - KAFKA_STORAGE_FETCH_MAX_WAIT_MS=${KAFKA_STORAGE_FETCH_MAX_WAIT_MS:-100}
+      - REDIS_PIPELINE_FLUSH=${REDIS_PIPELINE_FLUSH:-each}
+      - STOCKFLOW_E2E_SAMPLE_EVERY=${STOCKFLOW_E2E_SAMPLE_EVERY:-1}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - DB_HOST=timescaledb
       - DB_PORT=5432
       - DB_NAME=stockflow
@@ -356,6 +376,44 @@ services:
       - kafka
     restart: unless-stopped
 
+  # ---- 미국 주식 시세 시뮬레이터 (가짜 체결 생성기, 유료 시세 대체) ----
+  # ⚠️ source=SIMULATOR / exchange=SIM 인 시뮬레이션 데이터다. 실제 시세가 아니므로 분석·백테스트 해석에 주의.
+  # 실행: docker compose --profile sim up -d stock-simulator   (기본 up 에는 포함되지 않는다)
+  # SIM_PRICE_SOURCE=auto|alpaca 이면 ALPACA_API_KEY/SECRET 으로 시작가만 실제 시세에서 읽는다(실패 시 CSV 가격).
+  stock-simulator:
+    build:
+      context: ../../collectors
+      dockerfile: Dockerfile
+    container_name: stockflow-stock-simulator
+    command: python stock_simulator.py
+    profiles: ["sim"]
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC_NAME=market.normalized
+      - SIM_SYMBOLS_FILE=${SIM_SYMBOLS_FILE:-simulator/universe.csv}
+      # 발생률 모드: realistic(기본) = 종목별 실제 하루 체결 수(universe.csv daily_trades) 기반, SIM_TOTAL_TPS 는 무시된다
+      - SIM_RATE_MODE=${SIM_RATE_MODE:-realistic}
+      # realistic 발생률 배율. 1.0 이면 합계 평균 약 832 TPS(하루 약 1,950만 건)라 서버 보호용 기본값은 0.25 (평균 약 208 TPS)
+      - SIM_RATE_SCALE=${SIM_RATE_SCALE:-0.25}
+      # SIM_TOTAL_TPS 는 SIM_RATE_MODE=fixed 일 때만 쓰인다(weight 비례 고정 발생률)
+      - SIM_TOTAL_TPS=${SIM_TOTAL_TPS:-100}
+      - SIM_MARKET_HOURS=${SIM_MARKET_HOURS:-always}
+      - SIM_SEED=${SIM_SEED:-}
+      - SIM_DRY_RUN=${SIM_DRY_RUN:-false}
+      - SIM_TICK_INTERVAL_MS=${SIM_TICK_INTERVAL_MS:-50}
+      - SIM_PRICE_SOURCE=${SIM_PRICE_SOURCE:-static}
+      # 출력 source 값·tradeId 접두어. 부하 테스트는 SIMLOAD 처럼 따로 두면 source 한 가지로 지울 수 있다
+      - SIM_SOURCE_LABEL=${SIM_SOURCE_LABEL:-SIMULATOR}
+      - ALPACA_API_KEY=${ALPACA_API_KEY:-}
+      - ALPACA_API_SECRET=${ALPACA_API_SECRET:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    # kafka-setup 이 market.normalized(12 파티션)를 만든 뒤에 기동해야 한다.
+    # 그 전에 프로듀서가 토픽을 자동 생성하면 브로커 기본 파티션 수(6)로 만들어진다.
+    depends_on:
+      kafka-setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   # ---- 캔들 동기화 · 거래소 백필 · 결측 복구 (market-data-sync/README.md) ----
   # ohlcv_1m 스키마(V16)는 stockflow-realtime 의 Flyway 가 만든다. 스키마가 생기기 전의 실패는
   # 작업마다 로그만 남기고 다음 주기에 다시 시도한다.
@@ -414,7 +472,7 @@ services:
       EMAIL_URL: consolemail://
       GLITCHTIP_DOMAIN: http://localhost:8000
       DEFAULT_FROM_EMAIL: stockflow@example.com
-      REDIS_URL: redis://redis:6379/2
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379/2
       ENABLE_OPEN_USER_REGISTRATION: "true"
       CELERY_WORKER_AUTOSCALE: "1,3"
     restart: unless-stopped
@@ -487,6 +545,7 @@ services:
     profiles: ["metrics"]
     environment:
       - REDIS_ADDR=redis://redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
     ports:
       - "127.0.0.1:9121:9121"
     depends_on:

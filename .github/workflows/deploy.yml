@@ -41,10 +41,14 @@ jobs:
           port: 22000
           username: capstone01
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          # 서버(HDD·공용)에서 이미지 빌드가 10분을 넘겨 기본 timeout(10m)에 걸려 배포가 실패했다
+          command_timeout: 40m
           script: |
             set -e
             cd ~/capstone
             git fetch origin
             git reset --hard origin/main
             cd backend/infra
-            docker compose --profile metrics --profile alpaca up -d --build
+            docker compose --profile metrics up -d --build
+            # 컨테이너가 재생성되면 분석 서비스 코어·메모리 예약이 풀리므로 다시 건다
+            bash ~/capstone/backend/infra/reserve-analysis-capacity.sh || true

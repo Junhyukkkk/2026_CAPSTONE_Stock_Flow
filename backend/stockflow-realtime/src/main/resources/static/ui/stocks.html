@@ -209,12 +209,15 @@
         const button = document.getElementById('predictionRun');
         button.disabled = true;
         button.textContent = '계산 중...';
+        const symbol = selected;
         try {
-            const result = await API.predictionCompare(selected, interval, horizon);
+            // 출처(source)는 서버가 심볼의 최신 봉 출처로 정한다.
+            const result = await API.predictionCompare(symbol, interval, horizon);
+            if (selected !== symbol) return; // 기다리는 동안 다른 종목을 선택함
             renderPrediction(result);
             toast('예측 완료', 'ok');
         } catch (e) {
-            toast('예측 실패: ' + e.message, 'err');
+            if (selected === symbol) toast('예측 실패: ' + e.message, 'err');
         } finally {
             button.disabled = false;
             button.textContent = '예측 실행';
@@ -432,7 +435,11 @@
         let data;
         try {
             data = await API.intraday(symbol, tf, from.toISOString(), to.toISOString());
-        } catch (e) { toast('분봉 데이터 조회 실패: ' + e.message, 'err'); return; }
+        } catch (e) {
+            if (selected === symbol) toast('분봉 데이터 조회 실패: ' + e.message, 'err');
+            return;
+        }
+        if (selected !== symbol) return; // 기다리는 동안 다른 종목을 선택함
 
         Object.values(charts).forEach(c => c.remove && c.remove());
         charts = {};

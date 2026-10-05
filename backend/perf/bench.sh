@@ -82,13 +82,15 @@ docker exec stockflow-timescaledb psql -U postgres -d stockflow -q \
 docker exec stockflow-redis redis-cli FLUSHALL >/dev/null 2>&1
 
 # --- 2) 앱 기동 ---
+# 셸에 export 안 돼 있으면 떠 있는 Redis 컨테이너의 값을 쓴다
+REDIS_PASSWORD="${REDIS_PASSWORD:-$(docker exec stockflow-redis printenv REDIS_PASSWORD 2>/dev/null || true)}"
 docker run -d --name "$APP" --network "$NETWORK" -p 8081:8081 \
   -e KAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
   -e KAFKA_CONSUMER_GROUP_REALTIME=realtime-group \
   -e KAFKA_CONSUMER_GROUP_STORAGE=storage-group \
   -e KAFKA_CONSUMER_CONCURRENCY=12 \
   -e KAFKA_CONSUMER_MAX_POLL_RECORDS=100 \
-  -e REDIS_HOST=redis -e REDIS_PORT=6379 \
+  -e REDIS_HOST=redis -e REDIS_PORT=6379 -e REDIS_PASSWORD="$REDIS_PASSWORD" \
   -e DB_HOST=timescaledb -e DB_PORT=5432 -e DB_NAME=stockflow \
   -e DB_USERNAME=postgres -e DB_PASSWORD=postgres \
   -e SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE=16 \

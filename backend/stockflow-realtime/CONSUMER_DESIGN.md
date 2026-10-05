@@ -13,8 +13,29 @@ Producer → Kafka Topic → Consumer Group 1 (실시간용) → Redis
 
 | Consumer Group | 목적 | 저장소 | 처리 방식 |
 |---------------|------|--------|----------|
-| `realtime-group` | 실시간 데이터 제공 | Redis | 단일 메시지 처리 |
-| `storage-group` | 영구 저장 | PostgreSQL | 배치 처리 (성능 최적화) |
+| `realtime-group` | 실시간 데이터 제공 | Redis | 단일 메시지 처리 (`STOCKFLOW_OPT_REALTIME_BATCH=true` 면 poll 단위 배치) |
+| `storage-group` | 영구 저장 | PostgreSQL | 배치 처리 ([설정 빠른 참조](#설정-빠른-참조-저장실시간-경로)) |
+
+## 설정 빠른 참조 (저장·실시간 경로)
+
+기본값은 `application.yml`·`docker-compose.yml`·코드에서 확인한 값이다. env 로 덮어쓴다(compose 는 `${VAR:-기본값}` 형태).
+
+| 바꾸고 싶은 것 | env | 기본값 | 옛 값(되돌릴 때) | 효과·근거 |
+|---|---|---|---|---|
+| 멱등성 키 TTL(초) | `STOCKFLOW_IDEMPOTENCY_TTL_SECONDS` | 600 | 86400 | Redis 2GB 가 키로 가득 차 축출되는 것을 막는다. 0 이하면 기동 실패 |
+| 저장 컨슈머 poll 크기 | `KAFKA_STORAGE_MAX_POLL_RECORDS` | 500 | 100 | 저장 경로 묶음 효과 아래 참조 |
+| 저장 컨슈머 fetch 최소 바이트 | `KAFKA_STORAGE_FETCH_MIN_BYTES` | 65536 | 1 | 〃 |
+| 저장 컨슈머 fetch 최대 대기(ms) | `KAFKA_STORAGE_FETCH_MAX_WAIT_MS` | 100 | 500 | 〃 |
+| 저장 멱등성 체크 파이프라인 | `STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE` | true | false | 배치 전체를 Redis 1왕복 |
+| 실시간 poll 배치 소비 | `STOCKFLOW_OPT_REALTIME_BATCH` | false | - | 측정상 이득 없어 꺼 둠 |
+| Redis 파이프라인 flush | `REDIS_PIPELINE_FLUSH` | `each` (`close`, `buffered:N`) | - | 측정상 이득 없어 기본 유지 |
+| E2E 지연 샘플링 간격 | `STOCKFLOW_E2E_SAMPLE_EVERY` | 1 (매 건) | - | N 이면 N건마다 1건 계측 |
+| Lettuce 풀 `max-active` / Hikari 풀 / JDBC | `application.yml` 고정값 | 48 / 24 / `reWriteBatchedInserts=true` | 16 / Hikari 기본(10) / 옵션 없음 | `.env` 로는 안 바뀐다(compose 가 `environment:` 목록의 변수만 전달). compose `environment:` 에 `SPRING_DATA_REDIS_LETTUCE_POOL_MAX_ACTIVE`·`SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE`·`SPRING_DATASOURCE_URL`(전체 JDBC URL) 줄을 추가하거나 `docker run -e` 로 지정 ([RUNBOOK.md §3](../../RUNBOOK.md#3-스택-조작)) |
+
+저장 경로 묶음(TTL 600s + 저장 배치 500/64KB/100ms + `reWriteBatchedInserts` + Lettuce 풀 48 + Hikari 24 + 멱등성 파이프라인)은
+합쳐서 켤 때만 효과가 있다: 합성 부하 10,000/s 에서 저장 소비 6,000 → 9,000/s, 시뮬레이터 부하에서 저장 상한 약 6,600 → 약 14,000/s
+([OPTIMIZATION_HISTORY.md §2](../perf/OPTIMIZATION_HISTORY.md)). 서버 `backend/infra/.env` 나 컨테이너 env 에 옛 고정값
+(예: `STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=false`)이 남아 있으면 새 기본값을 덮어쓴다.
 
 ---
 
@@ -34,13 +55,14 @@ Producer → Kafka Topic → Consumer Group 1 (실시간용) → Redis
 
 ### 데이터 구조 (Redis)
 ```
-# 실시간 가격 (Sorted Set)
-key: "price:{symbol}"
-value: {price, timestamp, volume}
+# 최신가 (String, TTL 60초) — PriceKeys.LATEST_PRICE_PREFIX
+key: "price:latest:{symbol}"
 
-# 최신 틱 데이터 (Hash)
-key: "tick:{symbol}:latest"
-value: {price, volume, timestamp, source}
+# 실시간 전송 (Pub/Sub 채널) — PriceKeys.PRICE_CHANNEL_PREFIX
+channel: "price:{symbol}"
+
+# 멱등성 키 (String, TTL 기본 600초)
+key: "processed:{channel}:{symbol}:{source}:{tradeId}:{timestamp}"
 ```
 
 ---
@@ -57,23 +79,11 @@ value: {price, volume, timestamp, source}
 - **저장소**: PostgreSQL (TimescaleDB)
 - **Consumer Group**: `storage-group`
 - **토픽**: `market.normalized`
-- **배치 크기**: 100~1000건 (설정 가능)
+- **배치 크기**: poll 당 최대 `KAFKA_STORAGE_MAX_POLL_RECORDS`(기본 500)건 — 위 설정 표
+- **중복 방지**: DB 유니크 키 `(symbol, source, trade_id, ts)` + `ON CONFLICT DO NOTHING`. Redis 멱등성 키는 재전달 시 DB 왕복을 줄이는 용도라 TTL 이 짧아도(축출돼도) 정합성은 유지된다.
 
 ### 데이터 구조 (PostgreSQL)
-```sql
-CREATE TABLE market_ticks (
-    id BIGSERIAL PRIMARY KEY,
-    symbol VARCHAR(20) NOT NULL,
-    source VARCHAR(20) NOT NULL,
-    price DECIMAL(20, 8) NOT NULL,
-    volume DECIMAL(20, 8) NOT NULL,
-    timestamp TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- TimescaleDB 하이퍼테이블 변환
-SELECT create_hypertable('market_ticks', 'timestamp');
-```
+`market_ticks` 하이퍼테이블(`ts` 기준) — 정의는 `src/main/resources/db/migration/V1__create_market_ticks.sql`.
 
 ---
 
@@ -121,16 +131,14 @@ SELECT create_hypertable('market_ticks', 'timestamp');
 ### 배치 처리 (Storage Consumer)
 
 #### 배치 수집 전략
-- **시간 기반**: 1초마다 배치 처리
-- **크기 기반**: 100건 모이면 즉시 처리
-- **하이브리드**: 시간 또는 크기 중 먼저 도달하는 조건
+Spring Kafka 배치 리스너가 poll 한 묶음을 그대로 한 배치로 처리한다(별도 메모리 버퍼 없음).
+poll 크기·대기는 위 설정 표의 `KAFKA_STORAGE_*` 로 조정한다(최대 500건, 64KB 모이거나 100ms 지나면 반환).
 
 #### 배치 처리 흐름
 ```
-메시지 수신 → 메모리 버퍼에 추가
-           → 배치 조건 확인 (시간/크기)
-           → 조건 만족 시 DB 일괄 저장
-           → Offset 커밋
+poll(최대 500건) → 멱등성 체크(Redis 파이프라인 1왕복)
+                → DB 일괄 INSERT (reWriteBatchedInserts, ON CONFLICT DO NOTHING)
+                → 멱등성 키 마킹(파이프라인) → Offset 커밋
 ```
 
 ### 병렬 처리
@@ -140,12 +148,7 @@ SELECT create_hypertable('market_ticks', 'timestamp');
 - 파티션 수 = Consumer 인스턴스 수 (권장)
 
 #### 동시성 설정
-```yaml
-spring:
-  kafka:
-    listener:
-      concurrency: 4  # 파티션 수와 동일하게
-```
+`KAFKA_CONSUMER_CONCURRENCY`(기본 12) = `market.normalized` 파티션 수.
 
 ---
 
@@ -159,8 +162,7 @@ spring:
 3. **배치 처리**: 배치 전체 성공 후 일괄 커밋
 
 #### 트랜잭션 보장
-- **At-Least-Once**: 메시지 중복 가능 (idempotent 처리 필요)
-- **Exactly-Once**: 배치 처리 시 트랜잭션 사용
+- **At-Least-Once**: 메시지 중복 가능 → Redis 멱등성 키 + DB `ON CONFLICT DO NOTHING` 으로 흡수
 
 ---
 
@@ -198,64 +200,22 @@ spring:
 
 ---
 
-## 9. 구현 단계
+## 9. 구현 위치
 
-### 1단계: 기본 Consumer 구조
-- [ ] RealtimeConsumer 구현
-- [ ] StorageConsumer 구현
-- [ ] Consumer Group 분리
-- [ ] 기본 메시지 처리
-
-### 2단계: 에러 처리
-- [ ] DLQ 전송 로직
-- [ ] 에러 분류 (일시적/영구적)
-- [ ] 에러 로깅
-
-### 3단계: 재시도 전략
-- [ ] Exponential Backoff 구현
-- [ ] 재시도 로직
-- [ ] 최대 재시도 제한
-
-### 4단계: 성능 최적화
-- [ ] 배치 처리 구현
-- [ ] 병렬 처리 설정
-- [ ] 성능 튜닝
-
-### 5단계: 트랜잭션
-- [ ] 수동 Offset 커밋
-- [ ] 배치 트랜잭션
-- [ ] Idempotent 처리
-
-### 6단계: 모니터링
-- [ ] 메트릭 수집
-- [ ] 헬스체크 구현
-- [ ] 로깅 개선
-
-### 7단계: 통합 테스트
-- [ ] End-to-End 테스트
-- [ ] 부하 테스트
-- [ ] 장애 복구 테스트
+| 역할 | 클래스 (`com.stockflow.realtime`) |
+|---|---|
+| 실시간 소비 | `consumer.RealtimeConsumer` (단건), `consumer.RealtimeBatchConsumer` (`STOCKFLOW_OPT_REALTIME_BATCH=true`) |
+| 저장 소비 | `consumer.StorageConsumer` → `storage` 패키지 (`MarketTickBulkWriter`) |
+| 멱등성 | `transaction.IdempotencyService` |
+| 컨테이너·팩토리 설정 | `config.KafkaConsumerConfig` (기본 팩토리 / `storageConsumerFactory`) |
 
 ---
 
 ## 10. 설정 예시
 
 ### application.yml
-```yaml
-spring:
-  kafka:
-    consumer:
-      group-id: ${CONSUMER_GROUP_ID:realtime-group}
-      auto-offset-reset: latest
-      enable-auto-commit: false
-      max-poll-records: 100
-      fetch-min-size: 1
-      fetch-max-wait: 500ms
-    listener:
-      concurrency: 4
-      ack-mode: manual
-      type: batch  # Storage Consumer용
-```
+실제 값은 `backend/stockflow-realtime/src/main/resources/application.yml` 이 원본이다. 실시간 컨슈머는 `max-poll-records` 100 /
+`fetch-min-size` 1 / `fetch-max-wait` 500ms, 저장 컨슈머는 위 설정 표의 `KAFKA_STORAGE_*` 값을 쓴다. 둘 다 수동 커밋(`ack-mode: manual`).
 
 ---
 

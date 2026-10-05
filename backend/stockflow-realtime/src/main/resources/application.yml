@@ -40,19 +40,22 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
       timeout: 3000ms
       lettuce:
         pool:
-          max-active: 16
-          max-idle: 8
+          max-active: 48
+          max-idle: 48
           min-idle: 2
           max-wait: 2000ms
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:stockflow}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:stockflow}?reWriteBatchedInserts=true
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 24
 
   flyway:
     enabled: true
@@ -146,6 +149,11 @@ analysis:
   base-url: ${ANALYSIS_BASE_URL:http://localhost:8000}
   connect-timeout-ms: ${ANALYSIS_CONNECT_TIMEOUT_MS:3000}
   read-timeout-ms: ${ANALYSIS_READ_TIMEOUT_MS:120000}
+
+# 예측 결과 자동 저장(compare 호출 시 비동기, 실패/큐 포화는 로그만 남기고 버림)
+prediction:
+  history:
+    enabled: ${PREDICTION_HISTORY_ENABLED:true}
 
 # Retry Policy 설정 (RetryPolicyConfig에서 참조)
 retry:

@@ -14,8 +14,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
@@ -125,10 +123,12 @@ public class StorageService {
             stageMetrics.time(Stage.STORAGE_DB_INSERT, () -> marketTickBulkWriter.insertBatch(newTrades));
             stageMetrics.time(Stage.STORAGE_INSTRUMENT_REGISTRY,
                 () -> instrumentRegistryService.registerDistinctFromTrades(newTrades));
-            markProcessedAfterCommit(snapshot);
         });
         // tx_total - (db_insert + instrument_registry) = 커넥션 획득 대기 + 커밋 비용
         stageMetrics.record(Stage.STORAGE_TX_TOTAL, txStart);
+
+        // 3. 커밋·커넥션 반납 이후 멱등성 마킹 (롤백 시 위에서 예외가 전파되어 여기 오지 않는다)
+        markBatch(snapshot);
     }
 
     private List<NormalizedTradeDTO> filterDuplicates(List<NormalizedTradeDTO> trades) {
@@ -142,22 +142,19 @@ public class StorageService {
         return newTrades;
     }
 
-    private void markProcessedAfterCommit(List<NormalizedTradeDTO> trades) {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    markBatch(trades);
-                }
-            });
-        } else {
-            markBatch(trades);
-        }
-    }
-
-    /** 메시지당 Redis SET 1회 — 배치 크기만큼 왕복이 발생한다. */
+    /**
+     * 메시지당 Redis SET 1회(파이프라인 켜면 1회 왕복).
+     *
+     * 이미 커밋된 배치이므로 마킹 실패를 전파하면 saveBatch 가 재시도/DLQ 로 보내게 된다.
+     * DB 는 ON CONFLICT DO NOTHING 이라 재전달돼도 안전하므로 경고만 남기고 삼킨다.
+     */
     private void markBatch(List<NormalizedTradeDTO> trades) {
-        stageMetrics.time(Stage.STORAGE_IDEMPOTENCY_MARK,
-            () -> idempotencyService.markBatchAsProcessed(IdempotencyChannels.STORAGE, trades));
+        try {
+            stageMetrics.time(Stage.STORAGE_IDEMPOTENCY_MARK,
+                () -> idempotencyService.markBatchAsProcessed(IdempotencyChannels.STORAGE, trades));
+        } catch (Exception e) {
+            log.warn("Failed to mark batch as processed after commit (DB 커밋 완료, 재전달 시 ON CONFLICT 로 무시됨): size={}",
+                    trades.size(), e);
+        }
     }
 }

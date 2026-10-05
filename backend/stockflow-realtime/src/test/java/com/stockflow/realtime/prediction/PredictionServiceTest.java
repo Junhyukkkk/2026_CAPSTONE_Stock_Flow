@@ -44,7 +44,9 @@ class PredictionServiceTest {
         });
         server.start();
         service = new PredictionService(RestClient.builder(),
-                "http://127.0.0.1:" + server.getAddress().getPort(), 1000, 3000);
+                "http://127.0.0.1:" + server.getAddress().getPort(), 1000, 3000,
+                org.mockito.Mockito.mock(PredictionHistoryRecorder.class), false,
+                org.mockito.Mockito.mock(com.stockflow.realtime.stock.SymbolSourceResolver.class));
     }
 
     @AfterEach
