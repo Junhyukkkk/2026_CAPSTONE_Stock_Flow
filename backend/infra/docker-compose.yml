@@ -371,7 +371,7 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_TOPIC_NAME=market.normalized
       - SIM_SYMBOLS_FILE=${SIM_SYMBOLS_FILE:-simulator/universe.csv}
-      - SIM_TOTAL_TPS=${SIM_TOTAL_TPS:-300}
+      - SIM_TOTAL_TPS=${SIM_TOTAL_TPS:-100}
       - SIM_MARKET_HOURS=${SIM_MARKET_HOURS:-always}
       - SIM_SEED=${SIM_SEED:-}
       - SIM_DRY_RUN=${SIM_DRY_RUN:-false}
@@ -380,8 +380,11 @@ services:
       - ALPACA_API_KEY=${ALPACA_API_KEY:-}
       - ALPACA_API_SECRET=${ALPACA_API_SECRET:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    # kafka-setup 이 market.normalized(12 파티션)를 만든 뒤에 기동해야 한다.
+    # 그 전에 프로듀서가 토픽을 자동 생성하면 브로커 기본 파티션 수(6)로 만들어진다.
     depends_on:
-      - kafka
+      kafka-setup:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   # ---- 캔들 동기화 · 거래소 백필 · 결측 복구 (market-data-sync/README.md) ----

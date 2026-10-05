@@ -51,8 +51,29 @@ collectors/
 기존 파이프라인(`market.normalized` → Redis/WebSocket/TimescaleDB)은 코드 변경 없이 STOCK 으로 처리한다.
 
 ### 구분 방법
-모든 메시지는 `source="SIMULATOR"`, `exchange="SIM"`, `marketType="STOCK"` 이다. 실제 `ALPACA`/`IEX` 데이터와
-섞여도 `source` 로 걸러낼 수 있다. `tradeId` 는 `SIM-{symbol}-{run_id}-{seq}` 이며 재시작해도 겹치지 않는다.
+모든 메시지는 `source="SIMULATOR"`, `exchange="SIM"`, `marketType="STOCK"` 이다. `tradeId` 는
+`SIM-{symbol}-{run_id}-{seq}` 이며 재시작해도 겹치지 않는다.
+
+> ⚠️ **`alpaca-collector`(또는 다른 실제 시세 수집기)와 같은 종목에 동시에 돌리지 말 것.**
+> `market_ticks`·`ohlcv_1m`·`symbol_daily_ohlcv` 는 `source` 별로 행이 분리되지만, 그 밖의 경로는 출처를 구분하지 못한다.
+> - Redis `price:latest:{symbol}` 와 pub-sub `price:{symbol}` 은 마지막에 쓴 쪽이 이긴다 (UI 에서 실제가·가짜가가 번갈아 보인다).
+> - `instruments.exchange` 가 IEX 와 SIM 사이를 오간다.
+> - `symbol_daily_indicators` 는 `source` 컬럼이 없어 심볼·날짜당 한 행이다 (실제일·가짜일이 이어 붙는다).
+> - 일봉·분봉 히스토리 API 와 전일 종가 동기화는 출처를 합치거나 임의로 하나를 고를 수 있다.
+>
+> 운영 체크리스트:
+> 1. 먼저 `alpaca-collector` 를 중지한다.
+> 2. 시뮬레이터 종목에 기존 ALPACA 행이 있는지 확인한다: `SELECT DISTINCT symbol FROM symbol_daily_ohlcv WHERE source='ALPACA';`
+> 3. `SIM_PRICE_SOURCE` 는 재시작 사이에 바꾸지 않는다 (static ↔ alpaca 전환 시 가격이 0.2~5배 점프할 수 있다).
+
+### 운영 부하
+체결마다 Redis 멱등성 키(현재 코드 기본 TTL 24시간)와 DB 행이 하나씩 생긴다. 300 ticks/s 로 24시간 돌리면 하루 약 2,600만 건이라
+압축 전 기준 하루 수 GB 의 Redis 키·디스크가 필요하다. 라이브 스택에서는 낮은 TPS 와/또는 `SIM_MARKET_HOURS=us` 를 권장한다.
+이 때문에 **compose 의 `SIM_TOTAL_TPS` 기본값은 `100`** 이고(`backend/infra`·`collectors` 두 compose 모두), 환경 변수 없이
+`python stock_simulator.py` 로 직접 실행할 때의 코드 기본값만 `300` 이다.
+
+기본 `always` 모드는 변동성을 거래 초당 기준으로 스케일하면서 24시간 내내 돌기 때문에 일봉 변동성이 현실의 약 2배다.
+시뮬레이션 데이터의 지표·백테스트는 의미가 없다.
 
 ### 실행
 기본 `docker compose up` 에는 포함되지 않고 `sim` 프로파일에서만 기동한다.
@@ -69,7 +90,7 @@ SIM_DRY_RUN=true SIM_SEED=1 SIM_TOTAL_TPS=50 python stock_simulator.py
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `SIM_TOTAL_TPS` | `300` | 전 종목 합계 초당 체결 수 (종목별 빈도는 `weight` 비례, 포아송 도착) |
+| `SIM_TOTAL_TPS` | `300` (compose 는 `100`) | 전 종목 합계 초당 체결 수 (종목별 빈도는 `weight` 비례, 포아송 도착) |
 | `SIM_MARKET_HOURS` | `always` | `always` 또는 `us` (`us` = 미국 동부시간 월~금 09:30~16:00 에만 전송, 휴장일 미반영) |
 | `SIM_PRICE_SOURCE` | `static` | 시작가 출처. `static`=CSV 그대로, `alpaca`=Alpaca 스냅샷의 최신 체결가, `auto`=키가 있으면 alpaca 시도 |
 | `SIM_SEED` | (없음) | 지정하면 같은 가격·수량 시퀀스 재현 (`tradeId` 의 run_id 는 기동마다 다름) |
