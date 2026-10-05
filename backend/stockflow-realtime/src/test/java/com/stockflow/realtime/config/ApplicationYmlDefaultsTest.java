@@ -66,4 +66,11 @@ class ApplicationYmlDefaultsTest {
         assertThat(binder.bind("spring.data.redis.lettuce.pool.max-active", Integer.class).get()).isEqualTo(16);
         assertThat(binder.bind("spring.datasource.hikari.maximum-pool-size", Integer.class).get()).isEqualTo(10);
     }
+
+    @Test
+    void redisPasswordIsEmptyWithoutEnvAndResolvesFromEnv() throws IOException {
+        assertThat(environment(Map.of()).getProperty("spring.data.redis.password")).isEmpty();
+        assertThat(environment(Map.of("REDIS_PASSWORD", "s3cr3t")).getProperty("spring.data.redis.password"))
+            .isEqualTo("s3cr3t");
+    }
 }

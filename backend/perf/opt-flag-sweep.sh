@@ -28,7 +28,7 @@ SETTLE=${SETTLE:-10}
 BINANCE_WAS_RUNNING=$(docker ps --format '{{.Names}}' | grep -cx stockflow-binance-collector || true)
 
 OUT="$SCRIPT_DIR/results/optflags_${LABEL}_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$OUT"
+mkdir -p "$OUT"; chmod 700 "$OUT"   # base.env 에 비밀번호가 들어간다
 log() { echo -e "\033[1;33m[$(date +%H:%M:%S)]\033[0m $*"; }
 
 restore() {
@@ -57,6 +57,13 @@ reset_offsets() {
   log "컨슈머 오프셋 최신으로 리셋 (lag 0 에서 시작)"
 }
 
+# 옛 ref 의 application.yml 에는 spring.data.redis.password 가 없어 REDIS_PASSWORD 를 못 읽는다 → relaxed binding 으로 주입
+add_spring_redis_pw() {  # $1=env 파일 (값은 로그에 찍지 않는다)
+  local pw; pw=$(grep -m1 '^REDIS_PASSWORD=' "$1" | cut -d= -f2- || true)
+  if [ -n "$pw" ] && ! grep -q '^SPRING_DATA_REDIS_PASSWORD=' "$1"; then echo "SPRING_DATA_REDIS_PASSWORD=$pw" >> "$1"; fi
+  chmod 600 "$1"
+}
+
 wait_up() {  # $1=timeout(s)
   local n=$(( $1 / 3 ))
   for _ in $(seq 1 "$n"); do
@@ -70,6 +77,7 @@ IMAGE=${IMAGE:-$(docker inspect "$LIVE" --format '{{.Config.Image}}')}   # IMAGE
 docker inspect "$LIVE" --format '{{range .Config.Env}}{{println .}}{{end}}' \
   | grep -vE '^(PATH|HOME|HOSTNAME|JAVA_HOME|JAVA_VERSION|LANG|LC_ALL|TERM)=' | grep -v '^$' \
   > "$OUT/base.env"
+add_spring_redis_pw "$OUT/base.env"
 log "베이스 이미지: $IMAGE, rate=$RATE, hold=${HOLD}s, env $(wc -l < "$OUT/base.env")줄 → $OUT"
 
 # binance-collector 를 restore() 까지 계속 정지 — 실 트래픽이 오프셋 리셋 뒤에 새로 쌓여
@@ -125,6 +133,7 @@ for spec in "$@"; do
     mv "$OUT/$name.env.tmp" "$OUT/$name.env"
     echo "$kv" >> "$OUT/$name.env"
   done
+  chmod 600 "$OUT/$name.env"
   log "════════ $name  ($pairs) ════════"
   run_one "$name" "$OUT/$name.env"
 done

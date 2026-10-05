@@ -4,7 +4,7 @@
 # 나머지 컨테이너 = 코어 0-5.
 #   ANALYSIS_CPUSET=6,7 OTHER_CPUSET=0-5 ANALYSIS_MEM=3g ./reserve-analysis-capacity.sh
 # 대상은 이름이 stockflow- 로 시작하는 컨테이너뿐이다(같은 호스트의 다른 컨테이너는 건드리지 않는다).
-# 되돌리기: UNDO=1 ./reserve-analysis-capacity.sh  (cpuset 제한 해제)
+# 되돌리기: UNDO=1 ./reserve-analysis-capacity.sh  (cpuset·메모리 제한 해제)
 set -euo pipefail
 
 ANALYSIS_CONTAINER="${ANALYSIS_CONTAINER:-stockflow-analysis}"
@@ -15,9 +15,9 @@ ANALYSIS_MEM="${ANALYSIS_MEM:-3g}"
 if [ "${UNDO:-0}" = "1" ]; then
   ALL="0-$(($(nproc) - 1))"
   for c in $(docker ps --format '{{.Names}}' | grep '^stockflow-'); do docker update --cpuset-cpus "$ALL" "$c" >/dev/null; done
-  # --memory 0 은 "변경 없음"이라 상한이 안 풀린다 → 호스트 전체 메모리로 올린다
-  HOST_MEM=$(awk '/MemTotal/{print $2*1024}' /proc/meminfo)
-  docker update --cpu-shares 1024 --memory-reservation 0 --memory "$HOST_MEM" --memory-swap -1 "$ANALYSIS_CONTAINER" >/dev/null
+  # docker update 는 --memory / --memory-reservation 0 을 "변경 없음"으로 취급하므로 호스트 전체 메모리로 올려 사실상 해제한다 (mawk 지수표기 방지로 %d)
+  HOST_MEM=$(awk '/MemTotal/{printf "%d", $2*1024}' /proc/meminfo)
+  docker update --cpu-shares 1024 --memory-reservation "$HOST_MEM" --memory "$HOST_MEM" --memory-swap -1 "$ANALYSIS_CONTAINER" >/dev/null
   echo "해제 완료 (cpuset=$ALL)"
   exit 0
 fi
