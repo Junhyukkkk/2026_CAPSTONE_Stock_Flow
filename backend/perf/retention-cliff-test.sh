@@ -22,6 +22,7 @@ KAFKA_C=${KAFKA_C:-stockflow-kafka}
 PG_C=${PG_C:-stockflow-timescaledb}
 APP_C=${APP_C:-stockflow-realtime}
 COLLECTORS=${COLLECTORS:-"stockflow-binance-collector stockflow-alpaca-collector"}
+STOPPED_COLLECTORS=""   # 이 스크립트가 실제로 멈춘 것만 restore 에서 되살린다
 KAFKA_BOOTSTRAP=${KAFKA_BOOTSTRAP:-localhost:9092}
 TOPIC=${TOPIC:-market.normalized}
 NETWORK=${NETWORK:-infra_default}
@@ -61,7 +62,7 @@ restore() {
     docker exec "$KAFKA_C" kafka-configs --bootstrap-server "$KAFKA_BOOTSTRAP" \
       --entity-type topics --entity-name "$TOPIC" --alter --delete-config retention.ms >/dev/null 2>&1 || true
   fi
-  for c in $COLLECTORS; do docker start "$c" >/dev/null 2>&1 || true; done
+  for c in $STOPPED_COLLECTORS; do docker start "$c" >/dev/null 2>&1 || true; done
   docker start "$APP_C" >/dev/null 2>&1 || true
 }
 trap restore EXIT
@@ -74,7 +75,9 @@ docker exec "$KAFKA_C" kafka-configs --bootstrap-server "$KAFKA_BOOTSTRAP" \
 
 # 2) Consumer 정지
 log "수집기·앱(Consumer) 정지"
-for c in $COLLECTORS; do docker stop "$c" >/dev/null 2>&1 || true; done
+for c in $COLLECTORS; do
+  docker ps --format '{{.Names}}' | grep -qx "$c" && docker stop "$c" >/dev/null 2>&1 && STOPPED_COLLECTORS="$STOPPED_COLLECTORS $c" || true
+done
 docker stop "$APP_C" >/dev/null
 
 BEFORE_ROWS=$(pg "select count(*) from market_ticks")

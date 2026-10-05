@@ -232,7 +232,9 @@ fi
 # ── 2. 실데이터 수집기 정지 ────────────────────────────────────
 STOPPED=""
 if [ "$STOP_COLLECTORS" = "1" ]; then
+  RUNNING_BEFORE=$(docker ps --format '{{.Names}}')   # 이미 꺼진 컨테이너는 stop 해도 exit 0 이라 따로 거른다
   for c in $COLLECTORS; do
+    grep -qx "$c" <<<"$RUNNING_BEFORE" || continue
     docker stop "$c" >/dev/null 2>&1 && STOPPED="$STOPPED $c" && log "정지: $c" || true
   done
 fi

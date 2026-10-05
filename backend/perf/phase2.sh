@@ -13,6 +13,14 @@ IMG=stockflow-realtime:main
 ACTION=${1:-status}
 PAUSE_DURING_BUILD="stockflow-analysis stockflow-alpaca-collector stockflow-kafka-ui stockflow-redis-insight"
 
+# 옛 이미지의 application.yml 은 REDIS_PASSWORD 를 못 읽으므로 relaxed binding 으로 주입 (xtrace 에 값이 새지 않게 서브셸에서 끈다)
+add_spring_redis_pw() {  # $1=env 파일
+  ( set +x
+    pw=$(grep -m1 '^REDIS_PASSWORD=' "$1" | cut -d= -f2- || true)
+    if [ -n "$pw" ] && ! grep -q '^SPRING_DATA_REDIS_PASSWORD=' "$1"; then echo "SPRING_DATA_REDIS_PASSWORD=$pw" >> "$1"; fi
+    chmod 600 "$1" )
+}
+
 case "$ACTION" in
 build)
   if [ ! -d "$REPO" ]; then
@@ -26,13 +34,17 @@ build)
   if [ -d "$WT/.git" ] || [ -f "$WT/.git" ]; then (cd "$WT" && git fetch origin main && git reset --hard origin/main); else git worktree add -f "$WT" origin/main; fi
   echo ">> main rev: $(cd "$WT" && git rev-parse --short HEAD)  ($(cd "$WT" && git log -1 --format=%s))"
   echo ">> 빌드 중 리소스 확보: $PAUSE_DURING_BUILD 정지"
-  for c in $PAUSE_DURING_BUILD; do docker stop "$c" >/dev/null 2>&1 || true; done
+  PAUSED=""   # 원래 떠 있던 것만 되살린다(일부러 꺼 둔 alpaca 등을 켜지 않게)
+  RUNNING_BEFORE=$(docker ps --format '{{.Names}}')
+  for c in $PAUSE_DURING_BUILD; do
+    grep -qx "$c" <<<"$RUNNING_BEFORE" && docker stop "$c" >/dev/null 2>&1 && PAUSED="$PAUSED $c" || true
+  done
   echo ">> 이미지 빌드 (gradle 이미지 pull 포함, 수 분)"
   set +e
   DOCKER_BUILDKIT=1 docker build -t "$IMG" -f "$WT/backend/Dockerfile" "$WT/backend"
   rc=$?
   set -e
-  for c in $PAUSE_DURING_BUILD; do docker start "$c" >/dev/null 2>&1 || true; done
+  for c in $PAUSED; do docker start "$c" >/dev/null 2>&1 || true; done
   [ $rc -eq 0 ] && echo ">> 빌드 성공: $IMG" || { echo "!! 빌드 실패 (rc=$rc)"; exit $rc; }
   ;;
 
@@ -43,7 +55,8 @@ deploy)
   docker exec stockflow-kafka kafka-topics --bootstrap-server localhost:9092 \
     --alter --topic market.normalized --partitions 12 || echo "(이미 12거나 실패)"
   docker inspect stockflow-realtime --format '{{range .Config.Env}}{{println .}}{{end}}' \
-    | grep -E '^(KAFKA_|REDIS_|DB_|SPRING_|RETRY_|LOKI_|SENTRY_|STOCKFLOW_|JAVA_TOOL_OPTIONS|MONITORING_)' > /tmp/rt.env
+    | grep -E '^(KAFKA_|REDIS_|DB_|SPRING_|RETRY_|LOKI_|SENTRY_|STOCKFLOW_|JAVA_TOOL_OPTIONS|MONITORING_)' | (umask 077; cat > /tmp/rt.env)
+  add_spring_redis_pw /tmp/rt.env
   wc -l /tmp/rt.env
   docker stop stockflow-realtime
   docker rename stockflow-realtime stockflow-realtime-p1

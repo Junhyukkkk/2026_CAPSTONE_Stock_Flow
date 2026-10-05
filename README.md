@@ -177,7 +177,7 @@ DISCORD_WEBHOOK=            # Alertmanager → Discord 경보 웹훅 (선택)
 SENTRY_DSN=                 # 에러 트래킹 (선택, --profile sentry)
 ```
 전체 옵션은 [backend/infra/.env.example](backend/infra/.env.example) 참조.
-저장 경로 튜닝 값(`STOCKFLOW_IDEMPOTENCY_TTL_SECONDS` 등)의 기본값과 되돌리는 법은 [CONSUMER_DESIGN.md §5](backend/stockflow-realtime/CONSUMER_DESIGN.md).
+저장 경로 튜닝 값(`STOCKFLOW_IDEMPOTENCY_TTL_SECONDS` 등)의 기본값과 되돌리는 법은 [CONSUMER_DESIGN.md 설정 빠른 참조](backend/stockflow-realtime/CONSUMER_DESIGN.md#설정-빠른-참조-저장실시간-경로).
 
 ### 백엔드(Java) — compose 없이 로컬 실행 시
 ```bash

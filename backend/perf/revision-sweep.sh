@@ -36,7 +36,7 @@ RUNNING_BEFORE=$(docker ps --format '{{.Names}}')
 start_if_was_running() { local c; for c in "$@"; do grep -qx "$c" <<<"$RUNNING_BEFORE" && docker start "$c" >/dev/null 2>&1 || true; done; }
 
 OUT="$SCRIPT_DIR/results/revisions_${LABEL}_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$OUT"
+mkdir -p "$OUT"; chmod 700 "$OUT"   # rt.env 에 비밀번호가 들어간다
 log() { echo -e "\033[1;35m[$(date +%H:%M:%S)]\033[0m $*"; }
 
 # ── 복구: 시험용 컨테이너를 지우고 원래 컨테이너를 되살린다 ──────────────
@@ -70,6 +70,13 @@ reset_offsets() {
   log "컨슈머 오프셋 최신으로 리셋 (lag 0 에서 시작)"
 }
 
+# 옛 ref 의 application.yml 에는 spring.data.redis.password 가 없어 REDIS_PASSWORD 를 못 읽는다 → relaxed binding 으로 주입
+add_spring_redis_pw() {  # $1=env 파일 (값은 로그에 찍지 않는다)
+  local pw; pw=$(grep -m1 '^REDIS_PASSWORD=' "$1" | cut -d= -f2- || true)
+  if [ -n "$pw" ] && ! grep -q '^SPRING_DATA_REDIS_PASSWORD=' "$1"; then echo "SPRING_DATA_REDIS_PASSWORD=$pw" >> "$1"; fi
+  chmod 600 "$1"
+}
+
 wait_up() {  # $1=timeout(s)
   local n=$(( $1 / 3 ))
   for _ in $(seq 1 "$n"); do
@@ -89,6 +96,7 @@ docker inspect "$LIVE" --format '{{range .Config.Env}}{{println .}}{{end}}' \
 if [ -n "${DROP_ENV:-}" ]; then
   { grep -vE "$DROP_ENV" "$OUT/rt.env" || true; } > "$OUT/rt.env.tmp" && mv "$OUT/rt.env.tmp" "$OUT/rt.env"
 fi
+add_spring_redis_pw "$OUT/rt.env"
 LIVE_IMAGE=$(docker inspect "$LIVE" --format '{{.Config.Image}}')
 log "결과 → $OUT   (원래 이미지: $LIVE_IMAGE, env $(wc -l < "$OUT/rt.env")줄)"
 
