@@ -68,6 +68,7 @@
 
 ## 6. 반영 상태·주의
 
-- 코드: 브랜치 `perf/storage-path-opts`(`fae1466`) — **main 미병합, 운영 컨테이너는 아직 구버전**. 라이브 서버는 멱등성 TTL 24시간이라 Redis 가 2GB 가득 차 키를 계속 축출 중이다(시뮬레이터 상시 가동으로 심화). 병합·배포 시 TTL 10분으로 해소.
-- 배포 전 서버 `backend/infra/.env`·컨테이너 env 에 `STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=false` 같은 옛 고정값이 남아 있으면 새 기본값을 덮어쓴다(이번 측정은 해당 줄을 빼고 수행: `DROP_ENV`).
+- 상태: 저장 경로 최적화(#47)·예측 이력(#48)·시뮬레이터(#49)·스윕 도구(#50)는 10/5 에 main 으로 병합되고 서버에 배포됐다(이미지 `stockflow-app:local`, Flyway V17 적용). 롤백용 이미지는 `stockflow-app:pre-deploy-20261005`.
+- 배포 후 효과: 멱등성 TTL 24시간 → 10분으로 Redis 키 수가 줄어 메모리가 2.0GB(가득, 키 축출 중) → 1.3GB 로 내려갔다. 서버 `.env` 에 있던 `STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=false` 고정값은 새 기본값(true)을 덮어쓰므로 제거했다(백업 `.env.bak.20261005`).
+- 롤백: 같은 env 에 옛 값(`STOCKFLOW_IDEMPOTENCY_TTL_SECONDS=86400`, `KAFKA_STORAGE_MAX_POLL_RECORDS=100` 등, JDBC 플래그는 `SPRING_DATASOURCE_URL` 재지정).
 - 모든 수치는 시뮬레이터 부하(105종목)·단일 서버·공용 자원 위의 측정이다. 실제 미국 전 종목 체결량이 이 부하와 같다는 뜻이 아니다.

@@ -61,7 +61,18 @@ ssh -p 22000 -N -L 3000:localhost:3000 -L 9090:localhost:9090 -L 9093:localhost:
 > 2026-09-26: 인증 없이 외부에 공개돼 있던 Kafka UI 가 침입당해 채굴 프로그램이 돌았다.
 > 관리 도구를 다시 외부에 열지 말 것.
 
-<!-- redis-auth: TODO -->
+### Redis 인증
+
+| 항목 | 값 |
+|---|---|
+| 비밀번호 | 서버 `backend/infra/.env` 의 `REDIS_PASSWORD` (저장소에는 없음). 비우면 인증 없이 기동 — 로컬 개발 전용 |
+| 접근 | 포트는 `127.0.0.1:6379` 만. 컨테이너 안 `docker exec stockflow-redis redis-cli …` 는 `REDISCLI_AUTH` 로 자동 인증 |
+| 클라이언트 | 앱(realtime/storage)·redis-exporter·glitchtip 이 같은 변수 사용. RedisInsight 는 접속 정보에 비밀번호를 직접 입력 |
+| 비밀번호 변경 | `.env` 수정 → `docker compose --profile metrics up -d redis stockflow-realtime redis-exporter` |
+| Redis 재생성 후 | 캐시가 비므로 `POST /api/batch/prev-close-sync` 로 전일 종가를 다시 적재(안 하면 등락률 0%) |
+
+- 2026-09-20 에는 인증 없는 Redis 가 외부 봇에 replica 로 바뀌어(`READONLY You can't write against a read only replica`) 쓰기가 전부 막혔다. 같은 증상이면 `redis-cli info replication` 에서 `role:slave` 인지 먼저 본다.
+- 인증 확인: `docker exec stockflow-redis env -u REDISCLI_AUTH redis-cli ping` 이 `NOAUTH` 여야 한다.
 
 ---
 
@@ -223,15 +234,21 @@ curl -s -XPOST localhost:9093/api/v2/alerts -H 'Content-Type: application/json' 
 
 ### 라이브 시뮬레이터 켜기/끄기
 
+서버의 라이브 시뮬레이터는 compose 가 아니라 `docker run` 으로 띄운다(이미지 빌드 없이 레포 코드를 마운트). 현재 `SIM_RATE_SCALE=1.0`(105종목 평균 약 832/s).
+
 ```bash
-cd ~/capstone/backend/infra
-SIM_RATE_SCALE=1.0 docker compose --profile sim up -d stock-simulator   # 1.0 = 105종목 합계 평균 약 832/s
-docker logs stockflow-stock-simulator 2>&1 | grep '합계 평균 TPS'          # 기대 속도
-docker compose stop stock-simulator
+# 환경변수는 파일로 전달(키 값이 명령행·로그에 남지 않게): KAFKA_BOOTSTRAP_SERVERS=kafka:9092, KAFKA_TOPIC_NAME=market.normalized,
+# SIM_RATE_MODE=realistic, SIM_RATE_SCALE=1.0, SIM_MARKET_HOURS=always, SIM_PRICE_SOURCE=auto,
+# ALPACA_API_KEY, ALPACA_API_SECRET, PYTHONPATH=/app, HEALTH_FILE_PATH=/tmp/sim_health.json
+docker run -d --name stockflow-stock-simulator --restart unless-stopped --network infra_default \
+  --memory 256m --cpus 1 --cpuset-cpus 0-5 -v ~/capstone/collectors:/app:ro -w /app \
+  --env-file ~/sim.env collectors-binance-collector:latest python stock_simulator.py
+docker logs --tail 3 stockflow-stock-simulator        # 속도 약 830 msg/s 확인
+docker stop stockflow-stock-simulator                 # 끄기
 ```
 
-- 기본 `SIM_RATE_SCALE` 은 0.25(약 208/s), 상한 100. 라벨 기본 `SIMULATOR`(`BINANCE`/`ALPACA` 는 거부). 변수 전체는 [collectors/README.md](collectors/README.md#주요-환경-변수).
-- `alpaca-collector` 와 같은 종목에 동시에 돌리지 말 것(Redis 최신가·`instruments.exchange` 가 섞인다).
+- 개발용 compose 서비스(`docker compose --profile sim up -d stock-simulator`)의 기본 `SIM_RATE_SCALE` 은 0.25(약 208/s). 상한 100. 라벨 기본 `SIMULATOR`(`BINANCE`/`ALPACA` 는 거부). 변수 전체는 [collectors/README.md](collectors/README.md#주요-환경-변수).
+- `alpaca-collector` 는 시뮬레이터와 같은 티커를 쓰므로 함께 돌리지 않는다(Redis 최신가·`instruments.exchange` 가 섞인다). 배포 워크플로는 `--profile alpaca` 를 켜지 않는다.
 - 예측은 `(symbol, source)` 1분봉 50개 이상이 필요해 켠 뒤 약 1시간 후부터 가능하다.
 
 ### 부하 테스트 데이터(`SIMLOAD`) 지우기
@@ -257,8 +274,9 @@ done
 $PSQL -c "CALL refresh_continuous_aggregate('market_ticks_1m', to_timestamp($FROM), to_timestamp($TO))"
 
 # 4) 파생 테이블 (market-data-sync 가 만든 1분봉, 일봉 배치가 만든 일봉)
-$PSQL -c "DELETE FROM ohlcv_1m WHERE source='SIMLOAD'"
+# 시간 범위를 반드시 준다: 범위 없는 DELETE 는 모든 청크를 읽어 HDD 에서 10분 넘게 걸린다
+$PSQL -c "DELETE FROM ohlcv_1m WHERE source='SIMLOAD' AND bucket >= to_timestamp($FROM) AND bucket < to_timestamp($TO) + interval '1 hour'"
 $PSQL -c "DELETE FROM symbol_daily_ohlcv WHERE source='SIMLOAD'"
 ```
 
-확인: `$PSQL -c "SELECT source, count(*) FROM ohlcv_1m GROUP BY source"` 에 `SIMLOAD` 가 없어야 한다.
+확인: `$PSQL -c "SELECT count(*) FROM ohlcv_1m WHERE source='SIMLOAD' AND bucket >= to_timestamp($FROM)"` 가 0 이어야 한다. `market_ticks` 는 시간 범위 없이 `count(*)` 하지 않는다(HDD 에서 10분 이상).
