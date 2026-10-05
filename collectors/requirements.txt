@@ -15,3 +15,7 @@ requests==2.32.5
 # 환경 변수 관리
 # 주의: python-dotenv>=1.2.2는 Python 3.10+를 요구한다. Python 3.9 호환 마지막 버전에 고정.
 python-dotenv==1.2.1
+
+# 시간대 데이터베이스. python:3.9-slim 에 OS tzdata 가 없어도 zoneinfo(America/New_York)가
+# 동작하도록 설치한다 (주식 시뮬레이터 SIM_MARKET_HOURS=us 에서 사용).
+tzdata==2025.2

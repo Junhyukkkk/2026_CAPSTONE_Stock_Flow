@@ -8,13 +8,14 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import signal
 import sys
 import time
 from typing import Callable, Dict, List, Optional, Sequence
 
 from config import Config
-from simulator.generator import SOURCE, TradeGenerator, to_base36
+from simulator.generator import BASE36, SOURCE, TradeGenerator, to_base36
 from simulator.market_clock import is_us_market_open
 from simulator.universe import Instrument, load_universe
 
@@ -49,9 +50,9 @@ class StockSimulator:
         self._tick_sec = tick_interval_ms / 1000.0
         self._dry_run = dry_run
         self._producer = producer
-        self._generator = TradeGenerator(
-            instruments, total_tps, run_id=to_base36(int(clock() * 1000)), seed=seed
-        )
+        # 무작위 접미사는 시드 RNG 와 무관한 secrets 로 — 같은 ms 에 동시에 기동해도 tradeId 가 겹치지 않는다
+        run_id = to_base36(int(clock() * 1000)) + ''.join(secrets.choice(BASE36) for _ in range(4))
+        self._generator = TradeGenerator(instruments, total_tps, run_id=run_id, seed=seed)
         self._last_tick = clock()
         self._last_health_write = 0.0
         self.running = True
@@ -156,7 +157,11 @@ async def main():
         sys.exit(1)
 
     if Config.SIM_MARKET_HOURS == 'us':
-        is_us_market_open(time.time())  # tzdata 누락 시 여기서 바로 실패
+        try:
+            is_us_market_open(time.time())  # tzdata 누락 시 여기서 바로 실패
+        except RuntimeError as e:
+            logger.error(f"❌ {e}")
+            sys.exit(1)
     if Config.SIM_PRICE_SOURCE != 'static':
         logger.warning(f"⚠️ SIM_PRICE_SOURCE={Config.SIM_PRICE_SOURCE} 는 아직 지원하지 않아 static(CSV 시작가)을 사용합니다")
 

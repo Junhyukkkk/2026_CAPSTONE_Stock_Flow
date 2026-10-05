@@ -144,8 +144,9 @@ class Config:
             errors.append(f"SIM_TOTAL_TPS는 0보다 큰 유한한 수여야 합니다 (현재: {cls.SIM_TOTAL_TPS})")
         if cls.SIM_MARKET_HOURS not in ('always', 'us'):
             errors.append(f"SIM_MARKET_HOURS는 always 또는 us 여야 합니다 (현재: {cls.SIM_MARKET_HOURS!r})")
-        if not (1 <= cls.SIM_TICK_INTERVAL_MS <= 10000):
-            errors.append(f"SIM_TICK_INTERVAL_MS는 1~10000 이어야 합니다 (현재: {cls.SIM_TICK_INTERVAL_MS})")
+        # 한 번에 따라잡는 최대 구간이 2초라 그보다 긴 틱 간격은 체결을 조용히 덜 만든다
+        if not (1 <= cls.SIM_TICK_INTERVAL_MS <= 2000):
+            errors.append(f"SIM_TICK_INTERVAL_MS는 1~2000 이어야 합니다 (현재: {cls.SIM_TICK_INTERVAL_MS})")
         if cls.SIM_PRICE_SOURCE not in ('static', 'alpaca', 'auto'):
             errors.append(
                 f"SIM_PRICE_SOURCE는 static, alpaca, auto 중 하나여야 합니다 (현재: {cls.SIM_PRICE_SOURCE!r})"

@@ -11,14 +11,14 @@ SOURCE = 'SIMULATOR'
 EXCHANGE = 'SIM'
 MARKET_TYPE = 'STOCK'
 
-_BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz'
+BASE36 = '0123456789abcdefghijklmnopqrstuvwxyz'
 
 
 def to_base36(n: int) -> str:
     digits = ''
     while True:
         n, r = divmod(n, 36)
-        digits = _BASE36[r] + digits
+        digits = BASE36[r] + digits
         if n == 0:
             return digits
 

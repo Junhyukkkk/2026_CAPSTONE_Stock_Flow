@@ -1,9 +1,13 @@
 """StockSimulator(스케줄러/장 시간/전송) 단위 테스트 — Kafka 없이 가짜 시계·프로듀서 사용"""
 import json
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 import stock_simulator
+from simulator import market_clock
 from simulator.market_clock import is_us_market_open
 from simulator.universe import Instrument
 
@@ -145,3 +149,35 @@ def test_rejected_produce_is_counted_and_does_not_touch_health(tmp_path, monkeyp
 
     assert sim.rejected == len(trades) > 0
     assert not health.exists()
+
+
+def test_same_seed_same_prices_but_trade_ids_differ_across_simultaneous_starts():
+    """결정성은 가격/수량/시각/seq 로 유지하되, 같은 ms 에 동시에 기동한 두 실행의 tradeId 는 겹치지 않는다"""
+    def run():
+        clock = FakeClock(1_760_000_000.0)
+        sim = _simulator(clock, seed=42)
+        clock.now += 1
+        return sim.step()
+
+    a, b = run(), run()
+    assert len(a) > 100
+
+    def strip(trades):
+        return [(t["symbol"], t["price"], t["volume"], t["timestamp"], t["tradeId"].rsplit("-", 1)[1]) for t in trades]
+
+    assert strip(a) == strip(b)
+    assert not {t["tradeId"] for t in a} & {t["tradeId"] for t in b}
+    assert re.fullmatch(r"SIM-S\d-[0-9a-z]{4,}-\d+", a[0]["tradeId"])
+
+
+def test_missing_tz_database_raises_clear_error(monkeypatch):
+    def not_found(name):
+        raise market_clock.ZoneInfoNotFoundError(name)
+
+    market_clock._eastern.cache_clear()
+    monkeypatch.setattr(market_clock, "ZoneInfo", not_found)
+    try:
+        with pytest.raises(RuntimeError, match="tzdata"):
+            is_us_market_open(1_760_000_000.0)
+    finally:
+        market_clock._eastern.cache_clear()

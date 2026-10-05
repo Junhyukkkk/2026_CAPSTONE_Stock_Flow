@@ -55,6 +55,7 @@ def test_valid_overrides(monkeypatch):
     ({"SIM_DRY_RUN": "ture"}, "SIM_DRY_RUN"),
     ({"SIM_TICK_INTERVAL_MS": "0"}, "SIM_TICK_INTERVAL_MS"),
     ({"SIM_TICK_INTERVAL_MS": "fast"}, "SIM_TICK_INTERVAL_MS"),
+    ({"SIM_TICK_INTERVAL_MS": "2001"}, "SIM_TICK_INTERVAL_MS"),
     ({"SIM_PRICE_SOURCE": "bloomberg"}, "SIM_PRICE_SOURCE"),
 ])
 def test_invalid_values_fail_validation_with_clear_message(monkeypatch, capsys, env, expected_in_message):
@@ -75,3 +76,7 @@ def test_invalid_sim_env_does_not_break_regular_validate(monkeypatch):
     """SIM_* 오류가 Binance/Alpaca 수집기의 기동(Config.validate)에 영향을 주지 않는다"""
     Config = _load_config(monkeypatch, SIM_TOTAL_TPS="abc")
     assert Config.validate() is True
+
+
+def test_tick_interval_upper_bound_is_inclusive(monkeypatch):
+    assert _load_config(monkeypatch, SIM_TICK_INTERVAL_MS="2000").validate_simulator() is True
