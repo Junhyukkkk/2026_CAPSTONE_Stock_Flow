@@ -74,6 +74,8 @@ def test_valid_overrides(monkeypatch):
     ({"SIM_SOURCE_LABEL": "SIMLOAD\n"}, "SIM_SOURCE_LABEL"),
     ({"SIM_SOURCE_LABEL": "SIM-LOAD"}, "SIM_SOURCE_LABEL"),
     ({"SIM_SOURCE_LABEL": "A" * 33}, "SIM_SOURCE_LABEL"),
+    ({"SIM_SOURCE_LABEL": "BINANCE"}, "SIM_SOURCE_LABEL"),
+    ({"SIM_SOURCE_LABEL": "ALPACA"}, "SIM_SOURCE_LABEL"),
 ])
 def test_invalid_values_fail_validation_with_clear_message(monkeypatch, capsys, env, expected_in_message):
     Config = _load_config(monkeypatch, **env)  # 잘못된 값이어도 import 는 죽지 않는다
@@ -118,6 +120,11 @@ def test_valid_source_labels_accepted(monkeypatch, label):
     Config = _load_config(monkeypatch, SIM_SOURCE_LABEL=label)
     assert Config.SIM_SOURCE_LABEL == label
     assert Config.validate_simulator() is True
+
+
+def test_default_source_label_matches_generator_source(monkeypatch):
+    from simulator.generator import SOURCE
+    assert _load_config(monkeypatch).SIM_SOURCE_LABEL == SOURCE
 
 
 def test_empty_source_label_falls_back_to_default(monkeypatch):

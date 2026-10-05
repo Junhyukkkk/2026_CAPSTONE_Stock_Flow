@@ -9,8 +9,6 @@ import re
 from typing import Callable, List, Optional
 from dotenv import load_dotenv
 
-from simulator.generator import SOURCE as _DEFAULT_SIM_SOURCE  # 기본 source 라벨 단일 출처 (순환 import 없음)
-
 # .env 파일 로드
 load_dotenv()
 
@@ -22,6 +20,8 @@ _SIM_ENV_ERRORS: List[str] = []
 
 # market_ticks.source 는 VARCHAR(64), tradeId("<라벨>-<종목>-<run_id>-<seq>")는 VARCHAR(128) — 32자 라벨이면 여유가 크다
 _SIM_SOURCE_LABEL_RE = re.compile(r'[A-Z0-9_]{1,32}')
+# 실데이터 source 와 겹치면 가짜 틱이 (symbol, source) 키 집계·동기화 잡에 섞여 들어간다
+_RESERVED_SOURCES = ('BINANCE', 'ALPACA')
 
 
 def _sim_env(name: str, default, cast: Callable):
@@ -88,7 +88,7 @@ class Config:
     SIM_TICK_INTERVAL_MS: int = _sim_env('SIM_TICK_INTERVAL_MS', 50, int)
     SIM_PRICE_SOURCE: str = os.getenv('SIM_PRICE_SOURCE', 'static').strip().lower()  # static | alpaca | auto
     # 출력 source 값·tradeId 접두어. 공백은 일부러 strip 하지 않아 validate_simulator 가 거부한다(빈 값만 기본값)
-    SIM_SOURCE_LABEL: str = os.getenv('SIM_SOURCE_LABEL') or _DEFAULT_SIM_SOURCE
+    SIM_SOURCE_LABEL: str = os.getenv('SIM_SOURCE_LABEL') or 'SIMULATOR'
 
     # DLQ 설정
     DLQ_TOPIC_NAME: str = os.getenv('DLQ_TOPIC_NAME', 'market.dlq')
@@ -160,6 +160,8 @@ class Config:
             errors.append(
                 f"SIM_SOURCE_LABEL은 대문자·숫자·밑줄 1~32자여야 합니다 (현재: {cls.SIM_SOURCE_LABEL!r})"
             )
+        if cls.SIM_SOURCE_LABEL in _RESERVED_SOURCES:
+            errors.append(f"SIM_SOURCE_LABEL은 실데이터 source({', '.join(_RESERVED_SOURCES)})와 같을 수 없습니다")
         if cls.SIM_MARKET_HOURS not in ('always', 'us'):
             errors.append(f"SIM_MARKET_HOURS는 always 또는 us 여야 합니다 (현재: {cls.SIM_MARKET_HOURS!r})")
         # 한 번에 따라잡는 최대 구간이 2초라 그보다 긴 틱 간격은 체결을 조용히 덜 만든다
