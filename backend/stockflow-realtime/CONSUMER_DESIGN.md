@@ -14,7 +14,7 @@ Producer → Kafka Topic → Consumer Group 1 (실시간용) → Redis
 | Consumer Group | 목적 | 저장소 | 처리 방식 |
 |---------------|------|--------|----------|
 | `realtime-group` | 실시간 데이터 제공 | Redis | 단일 메시지 처리 (`STOCKFLOW_OPT_REALTIME_BATCH=true` 면 poll 단위 배치) |
-| `storage-group` | 영구 저장 | PostgreSQL | 배치 처리 (§5 저장 경로 튜닝) |
+| `storage-group` | 영구 저장 | PostgreSQL | 배치 처리 ([설정 빠른 참조](#설정-빠른-참조-저장실시간-경로)) |
 
 ## 설정 빠른 참조 (저장·실시간 경로)
 
@@ -30,7 +30,7 @@ Producer → Kafka Topic → Consumer Group 1 (실시간용) → Redis
 | 실시간 poll 배치 소비 | `STOCKFLOW_OPT_REALTIME_BATCH` | false | - | 측정상 이득 없어 꺼 둠 |
 | Redis 파이프라인 flush | `REDIS_PIPELINE_FLUSH` | `each` (`close`, `buffered:N`) | - | 측정상 이득 없어 기본 유지 |
 | E2E 지연 샘플링 간격 | `STOCKFLOW_E2E_SAMPLE_EVERY` | 1 (매 건) | - | N 이면 N건마다 1건 계측 |
-| Lettuce 풀 `max-active` / Hikari 풀 / JDBC | `application.yml` 고정값 | 48 / 24 / `reWriteBatchedInserts=true` | 16 / Hikari 기본(10) / 옵션 없음 | Spring 환경변수로 덮어쓰기(`SPRING_DATA_REDIS_LETTUCE_POOL_MAX_ACTIVE`, `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE`, `SPRING_DATASOURCE_URL`) |
+| Lettuce 풀 `max-active` / Hikari 풀 / JDBC | `application.yml` 고정값 | 48 / 24 / `reWriteBatchedInserts=true` | 16 / Hikari 기본(10) / 옵션 없음 | `.env` 로는 안 바뀐다(compose 가 `environment:` 목록의 변수만 전달). compose `environment:` 에 `SPRING_DATA_REDIS_LETTUCE_POOL_MAX_ACTIVE`·`SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE`·`SPRING_DATASOURCE_URL`(전체 JDBC URL) 줄을 추가하거나 `docker run -e` 로 지정 ([RUNBOOK.md §3](../../RUNBOOK.md#3-스택-조작)) |
 
 저장 경로 묶음(TTL 600s + 저장 배치 500/64KB/100ms + `reWriteBatchedInserts` + Lettuce 풀 48 + Hikari 24 + 멱등성 파이프라인)은
 합쳐서 켤 때만 효과가 있다: 합성 부하 10,000/s 에서 저장 소비 6,000 → 9,000/s, 시뮬레이터 부하에서 저장 상한 약 6,600 → 약 14,000/s

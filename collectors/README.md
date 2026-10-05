@@ -93,7 +93,7 @@ collectors/
 compose(`backend/infra`·`collectors`)의 기본값은 `SIM_RATE_MODE=realistic`, **`SIM_RATE_SCALE=0.25`**(서버 보호용 기본값, 합계 평균 약 208 TPS)이다.
 `SIM_TOTAL_TPS`(compose 기본 `100`, 코드 기본 `300`)는 `fixed` 모드 전용이다. 기본 `SIM_MARKET_HOURS=always` + scale 0.25 이면 하루 약 1,800만 건이므로
 라이브 스택에서는 `SIM_RATE_SCALE` 을 더 낮추거나 `SIM_MARKET_HOURS=us` 를 권장한다.
-(현재 학교 서버의 라이브 시뮬레이터는 의도적으로 `SIM_RATE_SCALE=1.0`·`always` 로 운영한다. 디스크 여유는 3.2TB 이고 압축 전 증가량을 모니터링한다. 줄이려면 §운영 절차에서 컨테이너를 낮춘 값으로 다시 띄운다.)
+(현재 학교 서버의 라이브 시뮬레이터는 의도적으로 `SIM_RATE_SCALE=1.0`·`always` 로 운영한다. 디스크 여유는 3.2TB 이고 압축 전 증가량을 모니터링한다. 줄이려면 [RUNBOOK.md §8](../RUNBOOK.md#8-시뮬레이터--테스트-데이터)의 `docker run` 절차로 낮춘 값을 주고 컨테이너를 다시 띄운다.)
 
 `fixed` + `always` 는 변동성을 거래 초당 기준으로 스케일하면서 24시간 내내 돌기 때문에 일봉 변동성이 현실의 약 2배다(`realistic` 은 이 한계가 없다).
 시뮬레이션 데이터의 지표·백테스트는 의미가 없다.

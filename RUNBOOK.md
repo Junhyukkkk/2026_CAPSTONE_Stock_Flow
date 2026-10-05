@@ -65,10 +65,10 @@ ssh -p 22000 -N -L 3000:localhost:3000 -L 9090:localhost:9090 -L 9093:localhost:
 
 | 항목 | 값 |
 |---|---|
-| 비밀번호 | 서버 `backend/infra/.env` 의 `REDIS_PASSWORD` (저장소에는 없음). 비우면 인증 없이 기동 — 로컬 개발 전용 |
+| 비밀번호 | 서버 `backend/infra/.env` 의 `REDIS_PASSWORD` (저장소에는 없음). 비우면 인증 없이 기동 — 로컬 개발 전용. glitchtip 의 `REDIS_URL` 에 `redis://:비밀번호@redis:6379/2` 로 끼워 넣으므로 `@ : / # ? % $` 를 쓰지 말 것(영숫자 권장) |
 | 접근 | 포트는 `127.0.0.1:6379` 만. 컨테이너 안 `docker exec stockflow-redis redis-cli …` 는 `REDISCLI_AUTH` 로 자동 인증 |
 | 클라이언트 | 앱(realtime/storage)·redis-exporter·glitchtip 이 같은 변수 사용. RedisInsight 는 접속 정보에 비밀번호를 직접 입력 |
-| 비밀번호 변경 | `.env` 수정 → `docker compose --profile metrics up -d redis stockflow-realtime redis-exporter`. `split` 프로파일을 쓰면 `stockflow-storage`, `sentry` 프로파일을 쓰면 glitchtip 도 함께 재생성 |
+| 비밀번호 변경 | `.env` 수정 → `docker compose --profile metrics up -d redis stockflow-realtime redis-exporter`. `split` 프로파일을 쓰면 `stockflow-storage`, `sentry` 프로파일을 쓰면 `glitchtip-web`·`glitchtip-worker` 도 함께 재생성 |
 | Redis 재생성 후 | 캐시가 비므로 서버에서 `curl -X POST http://localhost:8081/api/batch/prev-close-sync` 로 전일 종가를 다시 적재(안 하면 등락률 0%). 응답의 `loadedSymbols` 가 0 이 아니어야 한다 |
 
 - 2026-09-20 에는 인증 없는 Redis 가 외부 봇에 replica 로 바뀌어(`READONLY You can't write against a read only replica`) 쓰기가 전부 막혔다. 같은 증상이면 `redis-cli info replication` 에서 `role:slave` 인지 먼저 본다.
@@ -159,7 +159,15 @@ KAFKA_STORAGE_MAX_POLL_RECORDS=100
 KAFKA_STORAGE_FETCH_MIN_BYTES=1
 KAFKA_STORAGE_FETCH_MAX_WAIT_MS=500
 ```
-Lettuce 풀·Hikari·JDBC 옵션은 `application.yml` 기본값이지만 Spring 환경변수로 덮어쓸 수 있다: `SPRING_DATA_REDIS_LETTUCE_POOL_MAX_ACTIVE`, `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE`, `SPRING_DATASOURCE_URL`(끝의 `?reWriteBatchedInserts=true` 를 빼고 지정).
+Lettuce 풀(48)·Hikari 풀(24)·JDBC `reWriteBatchedInserts` 는 `application.yml` 고정값이라 위 `.env` 로는 바뀌지 않는다(compose 는 `environment:` 에 적힌 변수만 컨테이너에 넘기고, `.env` 의 다른 키는 전달하지 않는다). 바꾸려면:
+
+| 방법 | 내용 |
+|---|---|
+| compose 수정 | `backend/infra/docker-compose.yml` 의 `stockflow-realtime`(split 시 `stockflow-storage` 도) `environment:` 에 `- SPRING_DATA_REDIS_LETTUCE_POOL_MAX_ACTIVE=...`, `- SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE=...`, `- SPRING_DATASOURCE_URL=...` 줄을 추가 |
+| `docker run -e` / 스윕 env 파일 | 컨테이너에 직접 env 로 넘기면 Spring relaxed binding 이 위 이름을 인식한다 |
+| `SPRING_DATASOURCE_URL` 주의 | 전체 JDBC URL 을 줘야 한다(예: `jdbc:postgresql://timescaledb:5432/stockflow`, `DB_HOST`·`DB_PORT`·`DB_NAME` 은 치환되지 않음). JDBC 플래그를 빼려면 끝의 `?reWriteBatchedInserts=true` 를 빼고 지정 |
+
+TTL·`KAFKA_STORAGE_*` 4개는 compose 에 이미 들어 있어 `.env` 만으로 되돌릴 수 있다. 풀·JDBC 값의 롤백은 이전 이미지(`stockflow-app:pre-deploy-20261005`)로 되돌리거나 위 방법으로 옛 값을 지정한다.
 
 ---
 
@@ -230,7 +238,7 @@ curl -s -XPOST localhost:9093/api/v2/alerts -H 'Content-Type: application/json' 
 | `iowait` 급증·앱 전체가 느려짐 | 단일 HDD 서버. 대량 `DELETE`·연속 집계 갱신이 원인이면 중단하고 작은 시간 조각으로 나눠 다시(§8) |
 | Redis `evicted_keys` 증가 | `maxmemory 2gb allkeys-lru`. 멱등성 TTL 이 600 인지 §2 로 확인(옛 값 86400 이면 가득 참) |
 | 예측 API 가 비거나 오류 | HTTP 404 `예측에 필요한 시세 데이터가 부족합니다` = 해당 `(symbol, source)` 1분봉 50개 미만(시뮬레이터는 켠 뒤 약 1시간, `SIM_MARKET_HOURS=us` 면 장중에만). 503 `예측 서비스에 연결할 수 없습니다` = analysis 컨테이너 확인. 502 = 분석 서비스가 빈/잘못된 응답. 첫 호출은 학습으로 10~15초(Java 읽기 timeout 120초). 시뮬레이터 종목 추가는 `collectors/simulator/universe.csv` 에 행을 추가하고 컨테이너 재시작 |
-| 예측 이력이 안 쌓임 | `PREDICTION_HISTORY_ENABLED` 확인, `prediction_history_dropped_total` 지표(큐 포화) 확인. 조회: `GET /api/predictions/{symbol}/history?interval=1m&limit=20`(파라미터는 interval·limit 만). 직접 보기: `SELECT symbol, interval, source, base_ts, requested_at, latency_ms FROM prediction_runs ORDER BY requested_at DESC LIMIT 10;` |
+| 예측 이력이 안 쌓임 | `PREDICTION_HISTORY_ENABLED` 확인, `prediction_history_dropped_total` 지표(큐 포화) 확인. 조회: `GET /api/predictions/{symbol}/history?interval=1m&limit=20`(파라미터는 interval·limit 만). 직접 보기: `SELECT symbol, "interval", source, base_ts, requested_at, latency_ms FROM prediction_runs ORDER BY requested_at DESC LIMIT 10;` |
 | CD 배포가 중간에 실패·timeout | ① Actions 로그의 SSH 단계 확인(서버는 이미지 빌드가 10분 넘음, timeout 40분). ② 서버에서 `docker ps -a` 로 멈춘 컨테이너(`Exited`)와 이름이 `해시_이름` 인 `Created` 임시 컨테이너를 찾아, 멈춘 것은 `docker start`, 임시 것은 `docker rm`. ③ 재실행은 Actions → Deploy to server → Run workflow(`workflow_dispatch`) 또는 §3 수동 절차. ④ 끝나면 `reserve-analysis-capacity.sh`, Redis 가 재생성됐다면 `prev-close-sync`, 시뮬레이터가 떠 있고 `stockflow-alpaca-collector` 는 꺼져 있는지 확인 |
 | 배포 뒤 분석 응답이 느려짐 | 컨테이너가 재생성돼 CPU 예약이 풀렸다 → `./reserve-analysis-capacity.sh` (§3) |
 | 전체 재시작 | `cd ~/capstone/backend/infra && docker compose restart` |
@@ -254,7 +262,7 @@ docker logs --tail 3 stockflow-stock-simulator        # 속도 약 830 msg/s 확
 docker stop stockflow-stock-simulator                 # 끄기
 ```
 
-- 개발용 compose 서비스(`docker compose --profile sim up -d stock-simulator`)의 기본 `SIM_RATE_SCALE` 은 0.25(약 208/s). 상한 100. 라벨 기본 `SIMULATOR`(`BINANCE`/`ALPACA` 는 거부). 변수 전체는 [collectors/README.md](collectors/README.md#주요-환경-변수).
+- 개발용 compose 서비스(`docker compose --profile sim up -d stock-simulator`, 서비스명 `stock-simulator`)와 위 `docker run` 컨테이너는 이름(`stockflow-stock-simulator`)이 같아 서버에서는 **둘 중 하나만** 쓴다(함께 띄우면 이름 충돌). 컴포즈 서비스의 기본 `SIM_RATE_SCALE` 은 0.25(약 208/s). 상한 100. 라벨 기본 `SIMULATOR`(`BINANCE`/`ALPACA` 는 거부). 변수 전체는 [collectors/README.md](collectors/README.md#주요-환경-변수).
 - `alpaca-collector` 는 시뮬레이터와 같은 티커를 쓰므로 함께 돌리지 않는다(Redis 최신가·`instruments.exchange` 가 섞인다). 배포 워크플로는 `--profile alpaca` 를 켜지 않는다.
 - 예측은 `(symbol, source)` 1분봉 50개 이상이 필요해 켠 뒤 약 1시간 후부터 가능하다.
 
@@ -262,18 +270,21 @@ docker stop stockflow-stock-simulator                 # 끄기
 
 `tps-sweep.sh LOADGEN_MODE=sim` 이 만든 행(`source='SIMLOAD'`)을 아래 순서로 지운다. 순서가 중요하다.
 단일 HDD 라 한 번에 크게 지우면 iowait 로 서비스 전체가 느려지므로 **짧은 시간 조각**으로 나눈다.
-`market_ticks` 는 7일 뒤 압축되므로 그 전에 지운다. 시작·종료 시각은 스윕 결과 `timeline.csv` 의 `epoch`(서버 시계) 첫·끝 값을 쓴다.
+`market_ticks` 는 7일 뒤 압축되므로 그 전에 지운다. 시작·종료 시각(`FROM`/`TO`, epoch 초)은 해당 스윕 결과 디렉터리 `timeline.csv` 의 첫 열 `epoch`(서버 시계) 최솟값·최댓값을 쓴다. 시각 문자열을 해석하지 않으므로 시계 오차·시간대와 무관하다.
 
 ```bash
 PSQL="docker exec -i stockflow-timescaledb psql -U postgres -d stockflow"
-FROM=$(date -u -d '2026-10-05 02:00' +%s); TO=$(date -u -d '2026-10-05 04:00' +%s)
+# 스윕 결과 디렉터리(예: ~/capstone/backend/perf/results/sweep_<라벨>_<일시>)에서 첫 열 epoch 의 최소·최대 (헤더 제외)
+read FROM TO < <(awk -F, 'NR>1{if(min==""||$1<min)min=$1; if($1>max)max=$1} END{print min, max}' timeline.csv)
+TO=$((TO+1))   # 구간은 [FROM, TO) 이므로 마지막 표본 초를 포함시킨다
 
 # 1) 생성기 정지 (스윕이 끝났는지, stockflow-loadgen-sim-* 컨테이너가 없는지 확인)
 docker ps --format '{{.Names}}' | grep loadgen-sim
 
 # 2) market_ticks: 10분 조각으로 삭제
 for ((t=FROM; t<TO; t+=600)); do
-  $PSQL -c "DELETE FROM market_ticks WHERE source='SIMLOAD' AND ts >= to_timestamp($t) AND ts < to_timestamp($t+600)"
+  e=$((t+600)); ((e>TO)) && e=$TO     # 마지막 조각은 TO 에서 끊는다(TO-FROM 이 600 의 배수가 아니어도 안전)
+  $PSQL -c "DELETE FROM market_ticks WHERE source='SIMLOAD' AND ts >= to_timestamp($t) AND ts < to_timestamp($e)"
   sleep 5
 done
 
@@ -286,4 +297,17 @@ $PSQL -c "DELETE FROM ohlcv_1m WHERE source='SIMLOAD' AND bucket >= to_timestamp
 $PSQL -c "DELETE FROM symbol_daily_ohlcv WHERE source='SIMLOAD'"
 ```
 
-확인: `$PSQL -c "SELECT count(*) FROM ohlcv_1m WHERE source='SIMLOAD' AND bucket >= to_timestamp($FROM)"` 가 0 이어야 한다. `market_ticks` 는 시간 범위 없이 `count(*)` 하지 않는다(HDD 에서 10분 이상).
+확인: 아래 세 쿼리가 모두 0 이어야 한다. `market_ticks` 는 시간 범위 없이 `count(*)` 하지 않는다(HDD 에서 10분 이상).
+```bash
+$PSQL -c "SELECT count(*) FROM market_ticks WHERE source='SIMLOAD' AND ts >= to_timestamp($FROM) AND ts < to_timestamp($TO)"
+$PSQL -c "SELECT count(*) FROM ohlcv_1m WHERE source='SIMLOAD' AND bucket >= to_timestamp($FROM)"
+$PSQL -c "SELECT count(*) FROM symbol_daily_ohlcv WHERE source='SIMLOAD'"
+```
+
+이 절차가 지우지 않는 것:
+
+| 대상 | 이유 |
+|---|---|
+| `symbol_daily_indicators` | `source` 컬럼이 없어 SIMLOAD 행만 골라낼 수 없다(해당 종목·날짜 행이 남는다) |
+| `data_coverage` | 위 절차에 포함하지 않았다. `source='SIMLOAD'` 행이 있는지 별도로 조회해 확인 |
+| Redis 키(`price:latest:*` 등) | TTL 로 자동 만료 |

@@ -70,5 +70,5 @@
 
 - 상태: 저장 경로 최적화(#47)·예측 이력(#48)·시뮬레이터(#49)·스윕 도구(#50)는 10/5 에 main 으로 병합되고 서버에 배포됐다(이미지 `stockflow-app:local`, Flyway V17 적용). 롤백용 이미지는 `stockflow-app:pre-deploy-20261005`.
 - 배포 후 효과: 멱등성 TTL 24시간 → 10분으로 Redis 키 수가 줄어 메모리가 2.0GB(가득, 키 축출 중) → 1.3GB 로 내려갔다. 서버 `.env` 에 있던 `STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=false` 고정값은 새 기본값(true)을 덮어쓰므로 제거했다(백업 `.env.bak.20261005`).
-- 롤백: 같은 env 에 옛 값(`STOCKFLOW_IDEMPOTENCY_TTL_SECONDS=86400`, `KAFKA_STORAGE_MAX_POLL_RECORDS=100` 등, JDBC 플래그는 `SPRING_DATASOURCE_URL` 재지정).
+- 롤백: 같은 env 에 옛 값(`STOCKFLOW_IDEMPOTENCY_TTL_SECONDS=86400`, `KAFKA_STORAGE_MAX_POLL_RECORDS=100` 등, 풀·JDBC 값은 `application.yml` 고정값이라 `.env` 로 안 바뀐다. compose `environment:` 에 `SPRING_DATASOURCE_URL`(전체 JDBC URL) 등을 추가하거나 `docker run -e` 로 지정, 또는 이전 이미지로 복귀 — [RUNBOOK.md §3](../../RUNBOOK.md#3-스택-조작)).
 - 모든 수치는 시뮬레이터 부하(105종목)·단일 서버·공용 자원 위의 측정이다. 실제 미국 전 종목 체결량이 이 부하와 같다는 뜻이 아니다.
