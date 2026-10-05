@@ -147,6 +147,11 @@ analysis:
   connect-timeout-ms: ${ANALYSIS_CONNECT_TIMEOUT_MS:3000}
   read-timeout-ms: ${ANALYSIS_READ_TIMEOUT_MS:120000}
 
+# 예측 결과 자동 저장(compare 호출 시 비동기, 실패/큐 포화는 로그만 남기고 버림)
+prediction:
+  history:
+    enabled: ${PREDICTION_HISTORY_ENABLED:true}
+
 # Retry Policy 설정 (RetryPolicyConfig에서 참조)
 retry:
   mode: ${RETRY_MODE:sync}
