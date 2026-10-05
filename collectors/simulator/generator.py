@@ -8,7 +8,8 @@ from simulator.market_clock import us_intraday_profile
 from simulator.price_model import PriceModel, poisson
 from simulator.universe import Instrument
 
-SOURCE = 'SIMULATOR'
+SOURCE = 'SIMULATOR'  # 기본 source 라벨 (SIM_SOURCE_LABEL 로 바꿀 수 있다)
+DEFAULT_TRADE_ID_PREFIX = 'SIM'  # 기본 라벨의 tradeId 접두어는 기존 형식("SIM-...")을 유지한다
 EXCHANGE = 'SIM'
 MARKET_TYPE = 'STOCK'
 
@@ -39,12 +40,15 @@ class TradeGenerator:
         rate_mode: str = 'fixed',
         rate_scale: float = 1.0,
         market_hours: str = 'always',
+        source_label: str = SOURCE,
     ):
         """rate_mode='fixed': 종목 i 의 발생률 = total_tps * weight_i / Σweight (강도 곡선 없음).
         rate_mode='realistic': 평균 발생률 = daily_trades_i / 23400 * rate_scale (total_tps 무시),
         market_hours='us' 이면 거기에 장중 강도 곡선을 곱하고 'always' 는 평균으로 일정하게 낸다."""
         self._rng = random.Random(seed)
         self._run_id = run_id
+        self._source = source_label
+        self._id_prefix = DEFAULT_TRADE_ID_PREFIX if source_label == SOURCE else source_label
         self._symbols = [i.symbol for i in instruments]
         self._profiled = rate_mode == 'realistic' and market_hours == 'us'
         # 가격 모델은 "체결 수 N 개가 하루 변동성 vol/sqrt(252) 를 이루도록" 체결 간 시간을 환산한다.
@@ -94,11 +98,11 @@ class TradeGenerator:
             for t in sorted(rng.uniform(t_start, t_end) for _ in range(count)):
                 self._seq[idx] += 1
                 trades.append(NormalizedTradeDTO(
-                    source=SOURCE,
+                    source=self._source,
                     symbol=symbol,
                     price=Decimal(model.next_price_cents()).scaleb(-2),
                     volume=Decimal(model.next_volume()),
-                    trade_id=f"SIM-{symbol}-{self._run_id}-{self._seq[idx]}",
+                    trade_id=f"{self._id_prefix}-{symbol}-{self._run_id}-{self._seq[idx]}",
                     exchange=EXCHANGE,
                     timestamp=int(t * 1000),
                     received_at=received_at,

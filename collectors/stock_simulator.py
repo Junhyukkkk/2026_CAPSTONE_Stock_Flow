@@ -15,7 +15,7 @@ import time
 from typing import Callable, Dict, List, Optional, Sequence
 
 from config import Config
-from simulator.generator import BASE36, SOURCE, TradeGenerator, to_base36
+from simulator.generator import BASE36, TradeGenerator, to_base36
 from simulator.market_clock import is_us_market_open
 from simulator.price_seed import seed_prices
 from simulator.universe import Instrument, load_universe
@@ -44,6 +44,7 @@ class StockSimulator:
         tick_interval_ms: int = 50,
         rate_mode: str = 'fixed',
         rate_scale: float = 1.0,
+        source_label: str = 'SIMULATOR',
         dry_run: bool = False,
         producer=None,
         clock: Callable[[], float] = time.time,
@@ -58,6 +59,7 @@ class StockSimulator:
         self._generator = TradeGenerator(
             instruments, total_tps, run_id=run_id, seed=seed,
             rate_mode=rate_mode, rate_scale=rate_scale, market_hours=market_hours,
+            source_label=source_label,
         )
         self.expected_tps = self._generator.expected_tps
         self._last_tick = clock()
@@ -186,6 +188,7 @@ async def main():
         tick_interval_ms=Config.SIM_TICK_INTERVAL_MS,
         rate_mode=Config.SIM_RATE_MODE,
         rate_scale=Config.SIM_RATE_SCALE,
+        source_label=Config.SIM_SOURCE_LABEL,
         dry_run=Config.SIM_DRY_RUN,
         producer=producer,
     )
@@ -202,7 +205,7 @@ async def main():
         rate_desc = f"발생률: fixed | 총 TPS: {Config.SIM_TOTAL_TPS:g}"
     logger.info(
         f"🚀 주식 시뮬레이터 시작 (시뮬레이션 데이터 — 실제 시세 아님) | "
-        f"source={SOURCE} | 종목: {len(instruments)}개 | {rate_desc} | "
+        f"source={Config.SIM_SOURCE_LABEL} | 종목: {len(instruments)}개 | {rate_desc} | "
         f"장 시간: {Config.SIM_MARKET_HOURS} | 모드: {mode} | seed: {Config.SIM_SEED}"
     )
 

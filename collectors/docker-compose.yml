@@ -85,6 +85,8 @@ services:
       - SIM_DRY_RUN=${SIM_DRY_RUN:-false}
       - SIM_TICK_INTERVAL_MS=${SIM_TICK_INTERVAL_MS:-50}
       - SIM_PRICE_SOURCE=${SIM_PRICE_SOURCE:-static}
+      # 출력 source 값·tradeId 접두어. 부하 테스트는 SIMLOAD 처럼 따로 두면 source 한 가지로 지울 수 있다
+      - SIM_SOURCE_LABEL=${SIM_SOURCE_LABEL:-SIMULATOR}
       - ALPACA_API_KEY=${ALPACA_API_KEY:-}
       - ALPACA_API_SECRET=${ALPACA_API_SECRET:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

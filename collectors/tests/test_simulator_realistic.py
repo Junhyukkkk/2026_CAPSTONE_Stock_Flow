@@ -2,6 +2,7 @@
 import csv
 import math
 import os
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -247,3 +248,47 @@ def test_daily_return_std_stays_near_volatility_over_sqrt_252(market_hours, dail
     target = volatility / math.sqrt(252)
     # 평균회귀(하루 약 -20%)가 소폭 깎고 점프가 소폭 더하므로 ±25% 안이면 충분 (보정이 틀리면 1.9배·0.5배로 벗어난다)
     assert 0.75 * target < std < 1.25 * target, (std, target)
+
+
+# 큰 스케일: 한 프로세스의 생성기가 목표 발생률을 따라가는지 (처리 용량 한계 테스트용 scale 30~100)
+def _bundled_universe_tps():
+    universe = load_universe(UNIVERSE_CSV)
+    return universe, sum(i.daily_trades for i in universe) / SESSION_SECONDS
+
+
+def test_scale_30_tracks_target_rate_with_fake_clock():
+    universe, tps_at_1 = _bundled_universe_tps()
+    clock = type("Clock", (), {"now": ny(2026, 10, 5, 12, 0), "__call__": lambda self: self.now})()
+    sim = stock_simulator.StockSimulator(
+        universe, total_tps=1.0, market_hours="always", seed=3,
+        rate_mode="realistic", rate_scale=30.0, clock=clock,
+    )
+    assert sim.expected_tps == pytest.approx(tps_at_1 * 30)
+
+    seconds, tick = 5, 0.05
+    total = 0
+    for _ in range(int(seconds / tick)):
+        clock.now += tick
+        total += len(sim.step())
+    expected = tps_at_1 * 30 * seconds
+    assert abs(total - expected) < 0.03 * expected, (total, expected)  # 약 12.5만 건 — 포아송 표준편차 ≈ 0.3%
+
+
+def test_scale_100_step_produces_expected_count_and_is_cheap_relative_to_tick():
+    universe, tps_at_1 = _bundled_universe_tps()
+    clock = type("Clock", (), {"now": ny(2026, 10, 5, 12, 0), "__call__": lambda self: self.now})()
+    sim = stock_simulator.StockSimulator(
+        universe, total_tps=1.0, market_hours="always", seed=3,
+        rate_mode="realistic", rate_scale=100.0, tick_interval_ms=50, clock=clock,
+    )
+    steps, tick = 40, 0.05
+    total, cpu_per_step = 0, []
+    for _ in range(steps):
+        clock.now += tick
+        t0 = time.process_time()
+        total += len(sim.step())
+        cpu_per_step.append(time.process_time() - t0)
+    expected = tps_at_1 * 100 * steps * tick
+    assert abs(total - expected) < 0.03 * expected, (total, expected)
+    # 타이밍은 느슨하게(실측 약 20ms): 스텝당 평균 CPU 가 스케줄 간격(50ms) 안이면 한 프로세스로 따라간다
+    assert sum(cpu_per_step) / steps < tick, sum(cpu_per_step) / steps

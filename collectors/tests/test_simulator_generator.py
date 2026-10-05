@@ -1,14 +1,17 @@
 """simulator.generator / price_model 단위 테스트 (Kafka 불필요)"""
+import os
 import random
+import re
 from decimal import Decimal
 
 from normalizer import NormalizedTradeDTO
 from simulator.generator import TradeGenerator, to_base36
 from simulator.price_model import poisson
-from simulator.universe import Instrument
+from simulator.universe import Instrument, load_universe
 
 DTO_KEYS = {"source", "symbol", "price", "volume", "tradeId", "exchange", "timestamp", "receivedAt", "marketType"}
 T0 = 1_760_000_000.0
+UNIVERSE_CSV = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "simulator", "universe.csv")
 
 INSTRUMENTS = [
     Instrument("AAA", 100.0, 0.25, 1.0),
@@ -154,3 +157,46 @@ def test_to_base36():
     assert to_base36(0) == "0"
     assert to_base36(35) == "z"
     assert to_base36(36) == "10"
+
+
+# SIM_SOURCE_LABEL: source 값과 tradeId 접두어
+def _label_trades(label=None, seconds=2.0):
+    kwargs = {} if label is None else {"source_label": label}
+    generator = TradeGenerator(
+        [Instrument("AAA", 100.0, 0.3, 1.0), Instrument("BBB", 50.0, 0.3, 1.0)], 200.0,
+        run_id="abc", seed=1, **kwargs,
+    )
+    trades = generator.generate(1_760_000_000.0, 1_760_000_000.0 + seconds)
+    assert trades
+    return trades
+
+
+def test_default_label_keeps_source_and_trade_id_format():
+    for trades in (_label_trades(), _label_trades("SIMULATOR")):
+        assert {t.source for t in trades} == {"SIMULATOR"}
+        assert all(re.fullmatch(r"SIM-(AAA|BBB)-abc-\d+", t.trade_id) for t in trades)
+
+
+def test_custom_label_applies_to_source_and_trade_id_prefix_but_not_exchange_or_market_type():
+    trades = _label_trades("SIMLOAD")
+    assert {t.source for t in trades} == {"SIMLOAD"}
+    assert {t.exchange for t in trades} == {"SIM"} and {t.market_type for t in trades} == {"STOCK"}
+    assert all(re.fullmatch(r"SIMLOAD-(AAA|BBB)-abc-\d+", t.trade_id) for t in trades)
+    d = trades[0].to_dict()
+    assert d["source"] == "SIMLOAD" and d["exchange"] == "SIM" and d["marketType"] == "STOCK"
+
+
+def test_trade_id_and_source_fit_db_columns_with_longest_label():
+    """tradeId VARCHAR(128), source VARCHAR(64): 32자 라벨 + 번들 universe 최장 종목 + 먼 미래 run_id + 큰 seq 의 최악 길이"""
+    universe = load_universe(UNIVERSE_CSV)
+    longest = max((i.symbol for i in universe), key=len)
+    label = "X" * 32
+    run_id = to_base36(int(4_102_444_800 * 1000)) + "zzzz"  # 서기 2100년 ms + 무작위 접미사 4자
+    worst = f"{label}-{longest}-{run_id}-{10 ** 15}"  # seq 16자리 = 사실상 도달 불가능한 상한
+    assert len(worst) <= 128, len(worst)
+    assert len(label) <= 64
+
+    trades = TradeGenerator(
+        [Instrument(longest, 100.0, 0.3, 1.0)], 100.0, run_id=run_id, seed=1, source_label=label,
+    ).generate(1_760_000_000.0, 1_760_000_001.0)
+    assert trades and all(len(t.trade_id) <= 128 and len(t.source) <= 64 for t in trades)

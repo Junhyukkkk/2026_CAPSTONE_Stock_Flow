@@ -6,6 +6,7 @@ import pytest
 _SIM_KEYS = (
     "SIM_SYMBOLS_FILE", "SIM_TOTAL_TPS", "SIM_MARKET_HOURS", "SIM_SEED",
     "SIM_DRY_RUN", "SIM_TICK_INTERVAL_MS", "SIM_PRICE_SOURCE", "SIM_RATE_MODE", "SIM_RATE_SCALE",
+    "SIM_SOURCE_LABEL",
 )
 
 
@@ -28,6 +29,7 @@ def test_defaults(monkeypatch):
     assert Config.SIM_DRY_RUN is False
     assert Config.SIM_TICK_INTERVAL_MS == 50
     assert Config.SIM_PRICE_SOURCE == "static"
+    assert Config.SIM_SOURCE_LABEL == "SIMULATOR"
     assert Config.SIM_RATE_MODE == "realistic"
     assert Config.SIM_RATE_SCALE == 1.0
     assert Config.validate_simulator() is True
@@ -50,7 +52,8 @@ def test_valid_overrides(monkeypatch):
     ({"SIM_RATE_MODE": "foo"}, "SIM_RATE_MODE"),
     ({"SIM_RATE_SCALE": "0"}, "SIM_RATE_SCALE"),
     ({"SIM_RATE_SCALE": "-0.5"}, "SIM_RATE_SCALE"),
-    ({"SIM_RATE_SCALE": "11"}, "SIM_RATE_SCALE"),
+    ({"SIM_RATE_SCALE": "101"}, "SIM_RATE_SCALE"),
+    ({"SIM_RATE_SCALE": "100.5"}, "SIM_RATE_SCALE"),
     ({"SIM_RATE_SCALE": "nan"}, "SIM_RATE_SCALE"),
     ({"SIM_RATE_SCALE": "abc"}, "SIM_RATE_SCALE"),
     ({"SIM_TOTAL_TPS": "abc"}, "SIM_TOTAL_TPS"),
@@ -65,6 +68,12 @@ def test_valid_overrides(monkeypatch):
     ({"SIM_TICK_INTERVAL_MS": "fast"}, "SIM_TICK_INTERVAL_MS"),
     ({"SIM_TICK_INTERVAL_MS": "2001"}, "SIM_TICK_INTERVAL_MS"),
     ({"SIM_PRICE_SOURCE": "bloomberg"}, "SIM_PRICE_SOURCE"),
+    ({"SIM_SOURCE_LABEL": "simload"}, "SIM_SOURCE_LABEL"),
+    ({"SIM_SOURCE_LABEL": "SIM LOAD"}, "SIM_SOURCE_LABEL"),
+    ({"SIM_SOURCE_LABEL": " SIMLOAD"}, "SIM_SOURCE_LABEL"),
+    ({"SIM_SOURCE_LABEL": "SIMLOAD\n"}, "SIM_SOURCE_LABEL"),
+    ({"SIM_SOURCE_LABEL": "SIM-LOAD"}, "SIM_SOURCE_LABEL"),
+    ({"SIM_SOURCE_LABEL": "A" * 33}, "SIM_SOURCE_LABEL"),
 ])
 def test_invalid_values_fail_validation_with_clear_message(monkeypatch, capsys, env, expected_in_message):
     Config = _load_config(monkeypatch, **env)  # 잘못된 값이어도 import 는 죽지 않는다
@@ -96,3 +105,28 @@ def test_rate_mode_and_scale_overrides(monkeypatch):
     assert Config.SIM_RATE_SCALE == 10.0
     assert Config.validate_simulator() is True
     assert _load_config(monkeypatch, SIM_RATE_SCALE="0.25").SIM_RATE_SCALE == 0.25
+
+
+def test_rate_scale_upper_bound_is_100_inclusive(monkeypatch):
+    assert _load_config(monkeypatch, SIM_RATE_SCALE="100").validate_simulator() is True
+    assert _load_config(monkeypatch, SIM_RATE_SCALE="100.01").validate_simulator() is False
+    assert _load_config(monkeypatch, SIM_RATE_SCALE="101").validate_simulator() is False
+
+
+@pytest.mark.parametrize("label", ["SIMLOAD", "SIM_LOAD_2", "A", "X" * 32])
+def test_valid_source_labels_accepted(monkeypatch, label):
+    Config = _load_config(monkeypatch, SIM_SOURCE_LABEL=label)
+    assert Config.SIM_SOURCE_LABEL == label
+    assert Config.validate_simulator() is True
+
+
+def test_empty_source_label_falls_back_to_default(monkeypatch):
+    Config = _load_config(monkeypatch, SIM_SOURCE_LABEL="")
+    assert Config.SIM_SOURCE_LABEL == "SIMULATOR"
+    assert Config.validate_simulator() is True
+
+
+def test_invalid_source_label_does_not_break_shared_validate(monkeypatch):
+    Config = _load_config(monkeypatch, SIM_SOURCE_LABEL="bad label")
+    assert Config.validate() is True
+    assert Config.validate_simulator() is False

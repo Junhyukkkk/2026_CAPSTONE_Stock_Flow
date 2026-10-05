@@ -5,6 +5,7 @@
 import logging
 import math
 import os
+import re
 from typing import Callable, List, Optional
 from dotenv import load_dotenv
 
@@ -16,6 +17,9 @@ logger = logging.getLogger(__name__)
 # SIM_* 값 파싱 오류. 클래스 정의 시점에 예외로 죽지 않고 모아 두었다가
 # validate_simulator()가 한꺼번에 보고한다.
 _SIM_ENV_ERRORS: List[str] = []
+
+# market_ticks.source 는 VARCHAR(64), tradeId("<라벨>-<종목>-<run_id>-<seq>")는 VARCHAR(128) — 32자 라벨이면 여유가 크다
+_SIM_SOURCE_LABEL_RE = re.compile(r'[A-Z0-9_]{1,32}')
 
 
 def _sim_env(name: str, default, cast: Callable):
@@ -81,6 +85,8 @@ class Config:
     SIM_DRY_RUN: bool = _sim_env('SIM_DRY_RUN', False, _parse_bool)
     SIM_TICK_INTERVAL_MS: int = _sim_env('SIM_TICK_INTERVAL_MS', 50, int)
     SIM_PRICE_SOURCE: str = os.getenv('SIM_PRICE_SOURCE', 'static').strip().lower()  # static | alpaca | auto
+    # 출력 source 값·tradeId 접두어. 공백은 일부러 strip 하지 않아 validate_simulator 가 거부한다(빈 값만 기본값)
+    SIM_SOURCE_LABEL: str = os.getenv('SIM_SOURCE_LABEL') or 'SIMULATOR'
 
     # DLQ 설정
     DLQ_TOPIC_NAME: str = os.getenv('DLQ_TOPIC_NAME', 'market.dlq')
@@ -146,8 +152,12 @@ class Config:
             errors.append(f"SIM_TOTAL_TPS는 0보다 큰 유한한 수여야 합니다 (현재: {cls.SIM_TOTAL_TPS})")
         if cls.SIM_RATE_MODE not in ('realistic', 'fixed'):
             errors.append(f"SIM_RATE_MODE는 realistic 또는 fixed 여야 합니다 (현재: {cls.SIM_RATE_MODE!r})")
-        if not (math.isfinite(cls.SIM_RATE_SCALE) and 0 < cls.SIM_RATE_SCALE <= 10):
-            errors.append(f"SIM_RATE_SCALE은 0 초과 10 이하여야 합니다 (현재: {cls.SIM_RATE_SCALE})")
+        if not (math.isfinite(cls.SIM_RATE_SCALE) and 0 < cls.SIM_RATE_SCALE <= 100):
+            errors.append(f"SIM_RATE_SCALE은 0 초과 100 이하여야 합니다 (현재: {cls.SIM_RATE_SCALE})")
+        if not _SIM_SOURCE_LABEL_RE.fullmatch(cls.SIM_SOURCE_LABEL):
+            errors.append(
+                f"SIM_SOURCE_LABEL은 대문자·숫자·밑줄 1~32자여야 합니다 (현재: {cls.SIM_SOURCE_LABEL!r})"
+            )
         if cls.SIM_MARKET_HOURS not in ('always', 'us'):
             errors.append(f"SIM_MARKET_HOURS는 always 또는 us 여야 합니다 (현재: {cls.SIM_MARKET_HOURS!r})")
         # 한 번에 따라잡는 최대 구간이 2초라 그보다 긴 틱 간격은 체결을 조용히 덜 만든다

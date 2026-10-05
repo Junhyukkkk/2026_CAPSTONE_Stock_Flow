@@ -51,8 +51,8 @@ collectors/
 기존 파이프라인(`market.normalized` → Redis/WebSocket/TimescaleDB)은 코드 변경 없이 STOCK 으로 처리한다.
 
 ### 구분 방법
-모든 메시지는 `source="SIMULATOR"`, `exchange="SIM"`, `marketType="STOCK"` 이다. `tradeId` 는
-`SIM-{symbol}-{run_id}-{seq}` 이며 재시작해도 겹치지 않는다.
+모든 메시지는 `source="SIMULATOR"`(`SIM_SOURCE_LABEL` 로 변경 가능), `exchange="SIM"`, `marketType="STOCK"` 이다. `tradeId` 는
+`SIM-{symbol}-{run_id}-{seq}` 이며 재시작해도 겹치지 않는다. 라벨을 바꾸면 접두어도 `{라벨}-{symbol}-{run_id}-{seq}` 가 된다.
 
 > ⚠️ **`alpaca-collector`(또는 다른 실제 시세 수집기)와 같은 종목에 동시에 돌리지 말 것.**
 > `market_ticks`·`ohlcv_1m`·`symbol_daily_ohlcv` 는 `source` 별로 행이 분리되지만, 그 밖의 경로는 출처를 구분하지 못한다.
@@ -113,7 +113,8 @@ SIM_DRY_RUN=true SIM_SEED=1 SIM_RATE_MODE=realistic SIM_RATE_SCALE=0.1 python st
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `SIM_RATE_MODE` | `realistic` | `realistic`(종목별 `daily_trades` 기반 실제 체결량, `us` 에서 U자 강도 곡선) 또는 `fixed`(기존 `SIM_TOTAL_TPS`) |
-| `SIM_RATE_SCALE` | `1.0` (compose 는 `0.25`) | realistic 발생률 배율 (0 초과 10 이하) — 서버 용량에 맞춰 줄이는 용도 |
+| `SIM_RATE_SCALE` | `1.0` (compose 는 `0.25`) | realistic 발생률 배율 (0 초과 **100 이하**) — 평소엔 서버 용량에 맞춰 줄이고, 처리 용량 한계 측정에서는 키운다(scale 12 ≈ 1만 TPS) |
+| `SIM_SOURCE_LABEL` | `SIMULATOR` (compose 도 동일) | 출력 `source` 값과 tradeId 접두어. `^[A-Z0-9_]{1,32}$`. 부하 테스트는 `SIMLOAD` 처럼 따로 지정해 운영 데이터와 분리하고 나중에 `source` 로 삭제한다. 기본 라벨의 tradeId 접두어는 기존대로 `SIM`. `exchange=SIM`·`marketType=STOCK` 은 라벨과 무관하게 유지 |
 | `SIM_TOTAL_TPS` | `300` (compose 는 `100`) | **`fixed` 모드 전용** 전 종목 합계 초당 체결 수 (종목별 빈도는 `weight` 비례, 포아송 도착) |
 | `SIM_MARKET_HOURS` | `always` | `always` 또는 `us` (`us` = 미국 동부시간 월~금 09:30~16:00 에만 전송, 휴장일 미반영) |
 | `SIM_PRICE_SOURCE` | `static` | 시작가 출처. `static`=CSV 그대로, `alpaca`=Alpaca 스냅샷의 최신 체결가, `auto`=키가 있으면 alpaca 시도 |
