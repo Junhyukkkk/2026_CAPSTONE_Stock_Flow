@@ -290,5 +290,5 @@ def test_scale_100_step_produces_expected_count_and_is_cheap_relative_to_tick():
         cpu_per_step.append(time.process_time() - t0)
     expected = tps_at_1 * 100 * steps * tick
     assert abs(total - expected) < 0.03 * expected, (total, expected)
-    # 타이밍은 느슨하게(실측 약 20ms): 스텝당 평균 CPU 가 스케줄 간격(50ms) 안이면 한 프로세스로 따라간다
-    assert sum(cpu_per_step) / steps < tick, sum(cpu_per_step) / steps
+    # 실측 약 19ms. 느린/스로틀된 컨테이너에서도 깨지지 않게 틱의 2배로 두고, 병적인 느려짐만 잡는다
+    assert sum(cpu_per_step) / steps < 2 * tick, sum(cpu_per_step) / steps

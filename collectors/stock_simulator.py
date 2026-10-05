@@ -15,7 +15,7 @@ import time
 from typing import Callable, Dict, List, Optional, Sequence
 
 from config import Config
-from simulator.generator import BASE36, TradeGenerator, to_base36
+from simulator.generator import BASE36, SOURCE as DEFAULT_SOURCE_LABEL, TradeGenerator, to_base36
 from simulator.market_clock import is_us_market_open
 from simulator.price_seed import seed_prices
 from simulator.universe import Instrument, load_universe
@@ -32,6 +32,32 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # 프로세스 정지/시스템 절전 뒤 한꺼번에 몰아서 쏟아내지 않도록 한 번에 따라잡는 최대 구간
 MAX_CATCHUP_SEC = 2.0
 CLOSED_POLL_SEC = 1.0
+# 종료 시 달성률 경고 기준: 평균 속도 비교가 의미 있도록 최소 활성 시간과 목표 대비 하한
+SHORTFALL_MIN_ELAPSED_SEC = 10.0
+SHORTFALL_RATIO = 0.9
+
+
+def shortfall_warning(
+    sent: int,
+    expected_tps: Optional[float],
+    elapsed_sec: float,
+    dry_run: bool = False,
+) -> Optional[str]:
+    """실제 전송 건수가 목표(expected_tps x 경과 초)의 90% 미만이면 경고 문구, 아니면 None.
+
+    dry-run·목표 속도 미상(<=0/None)·경과 10초 미만이면 판단하지 않는다.
+    """
+    if dry_run or not expected_tps or expected_tps <= 0 or elapsed_sec < SHORTFALL_MIN_ELAPSED_SEC:
+        return None
+    target = expected_tps * elapsed_sec
+    if sent >= target * SHORTFALL_RATIO:
+        return None
+    return (
+        f"목표 발생률을 달성하지 못했습니다: 전송 {sent:,}건 / 목표 {target:,.0f}건 "
+        f"(달성률 {sent / target * 100:.1f}%, 부족 {target - sent:,.0f}건, 평균 {sent / elapsed_sec:,.1f} msg/s "
+        f"< 목표 {expected_tps:,.1f} msg/s). 단일 프로세스 Kafka 전송 한계일 수 있으니 "
+        f"SIM_RATE_SCALE 을 나눠 시뮬레이터를 여러 개 띄우세요"
+    )
 
 
 class StockSimulator:
@@ -44,7 +70,7 @@ class StockSimulator:
         tick_interval_ms: int = 50,
         rate_mode: str = 'fixed',
         rate_scale: float = 1.0,
-        source_label: str = 'SIMULATOR',
+        source_label: str = DEFAULT_SOURCE_LABEL,
         dry_run: bool = False,
         producer=None,
         clock: Callable[[], float] = time.time,
@@ -62,6 +88,9 @@ class StockSimulator:
             source_label=source_label,
         )
         self.expected_tps = self._generator.expected_tps
+        # 달성률 경고용 활성 시간(장 열린 구간만) — us + realistic 은 강도 곡선 때문에 짧은 구간 평균이 목표와 다르므로 제외
+        self._track_shortfall = not (market_hours == 'us' and rate_mode == 'realistic')
+        self._active_sec = 0.0
         self._last_tick = clock()
         self._last_health_write = 0.0
         self.running = True
@@ -81,6 +110,7 @@ class StockSimulator:
             if not (self.market_open and is_us_market_open(t_start)):
                 return []
 
+        self._active_sec += now - t_start
         trades = [t.to_dict() for t in self._generator.generate(t_start, now)]
         self.generated += len(trades)
         return trades
@@ -141,6 +171,14 @@ class StockSimulator:
                 f"평균 속도: {metrics['messages_per_second']:.2f} msg/s | "
                 f"성공률: {metrics['success_rate']*100:.2f}%"
             )
+            warning = shortfall_warning(
+                metrics['total_sent'],
+                self.expected_tps if self._track_shortfall else None,
+                self._active_sec,
+                self._dry_run,
+            )
+            if warning:
+                logger.warning(f"⚠️ {warning}")
         else:
             logger.info(f"📊 최종 통계 (dry-run) | 생성: {self.generated:,}건")
         logger.info("✅ 종료 완료")

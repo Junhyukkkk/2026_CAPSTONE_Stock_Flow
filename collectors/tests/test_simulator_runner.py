@@ -181,3 +181,43 @@ def test_missing_tz_database_raises_clear_error(monkeypatch):
             is_us_market_open(1_760_000_000.0)
     finally:
         market_clock._eastern.cache_clear()
+
+
+# --- 종료 시 목표 발생률 미달 경고 ---
+
+def test_shortfall_warning_decision_logic():
+    warn = stock_simulator.shortfall_warning
+    # 목표 1000건(100 tps x 10 s) 의 90% = 900건: 미달이면 경고, 정확히 90% 이상이면 없음
+    msg = warn(sent=899, expected_tps=100.0, elapsed_sec=10.0)
+    assert msg is not None and "899" in msg and "89.9%" in msg and "부족 101건" in msg
+    assert warn(sent=900, expected_tps=100.0, elapsed_sec=10.0) is None
+    assert warn(sent=1500, expected_tps=100.0, elapsed_sec=10.0) is None
+    # 판단하지 않는 경우: 10초 미만, dry-run, 목표 미상
+    assert warn(sent=0, expected_tps=100.0, elapsed_sec=9.99) is None
+    assert warn(sent=0, expected_tps=100.0, elapsed_sec=60.0, dry_run=True) is None
+    assert warn(sent=0, expected_tps=None, elapsed_sec=60.0) is None
+    assert warn(sent=0, expected_tps=0.0, elapsed_sec=60.0) is None
+
+
+class _StatsProducer(FakeProducer):
+    def __init__(self, total_sent):
+        super().__init__()
+        self.total_sent = total_sent
+
+    def close(self):
+        pass
+
+    def get_metrics(self):
+        return {"total_sent": self.total_sent, "total_failed": 0,
+                "messages_per_second": 0.0, "success_rate": 1.0}
+
+
+@pytest.mark.parametrize("total_sent, expect_warning", [(0, True), (10 ** 9, False)])
+def test_shutdown_logs_shortfall_warning(caplog, total_sent, expect_warning):
+    clock = FakeClock(1_760_000_000.0)
+    sim = _simulator(clock, producer=_StatsProducer(total_sent), market_hours="always")
+    _drive(sim, clock, 12)  # 가짜 시계로 활성 시간 12초 누적 (실제 sleep 없음)
+    with caplog.at_level("WARNING", logger=stock_simulator.logger.name):
+        sim.shutdown()
+    warned = any("목표 발생률을 달성하지 못했습니다" in r.getMessage() for r in caplog.records)
+    assert warned is expect_warning

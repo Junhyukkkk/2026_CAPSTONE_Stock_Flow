@@ -9,6 +9,8 @@ import re
 from typing import Callable, List, Optional
 from dotenv import load_dotenv
 
+from simulator.generator import SOURCE as _DEFAULT_SIM_SOURCE  # 기본 source 라벨 단일 출처 (순환 import 없음)
+
 # .env 파일 로드
 load_dotenv()
 
@@ -86,7 +88,7 @@ class Config:
     SIM_TICK_INTERVAL_MS: int = _sim_env('SIM_TICK_INTERVAL_MS', 50, int)
     SIM_PRICE_SOURCE: str = os.getenv('SIM_PRICE_SOURCE', 'static').strip().lower()  # static | alpaca | auto
     # 출력 source 값·tradeId 접두어. 공백은 일부러 strip 하지 않아 validate_simulator 가 거부한다(빈 값만 기본값)
-    SIM_SOURCE_LABEL: str = os.getenv('SIM_SOURCE_LABEL') or 'SIMULATOR'
+    SIM_SOURCE_LABEL: str = os.getenv('SIM_SOURCE_LABEL') or _DEFAULT_SIM_SOURCE
 
     # DLQ 설정
     DLQ_TOPIC_NAME: str = os.getenv('DLQ_TOPIC_NAME', 'market.dlq')
