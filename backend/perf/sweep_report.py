@@ -139,6 +139,42 @@ for r in rows:
           f"{peak(xs,'swap_used_mb'):.0f}MB | {ev_delta} | {hp:.0f} |")
 print()
 
+def probe_table():
+    # tps-sweep.sh 의 ANALYSIS_PROBE=1 결과. 파일이 없으면 아무것도 출력하지 않는다(기존 출력 유지).
+    path = f'{OUT}/analysis_probe.csv'
+    if not os.path.exists(path):
+        return
+    by_rate = {}
+    for r in csv.DictReader(open(path, encoding='utf-8', errors='replace')):
+        by_rate.setdefault((r.get('rate') or '').strip(), []).append(r)
+    order = [r['rate'] for r in rows if r['rate'] in by_rate]
+    order += sorted((k for k in by_rate if k not in order), key=lambda k: (not k.isdigit(), int(k) if k.isdigit() else 0, k))
+    print('## 분석 API 응답시간 (`/api/predictions/<SYM>/compare`)\n')
+    print('| rate | 호출 | 성공(200) | 실패 | 최소 s | 중앙값 s | 최대 s |')
+    print('| ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
+    for rate in order:
+        calls = by_rate[rate]
+        ok_secs = []
+        for c in calls:
+            try:
+                if (c.get('http') or '').strip() == '200':
+                    ok_secs.append(float(c.get('seconds')))
+            except (TypeError, ValueError):
+                pass  # 200 인데 시간이 비었거나 깨진 행은 시간 통계에서만 제외
+        nok = sum(1 for c in calls if (c.get('http') or '').strip() == '200')
+        if ok_secs:
+            ok_secs.sort()
+            mid = len(ok_secs) // 2
+            med = ok_secs[mid] if len(ok_secs) % 2 else (ok_secs[mid - 1] + ok_secs[mid]) / 2
+            stats = f'{ok_secs[0]:.3f} | {med:.3f} | {ok_secs[-1]:.3f}'
+        else:
+            stats = 'NA | NA | NA'
+        print(f'| {rate} | {len(calls)} | {nok} | {len(calls) - nok} | {stats} |')
+    print('\n시간 통계는 성공(HTTP 200) 호출만 대상. 실패 = 200 이 아닌 응답(000 = 연결 실패/타임아웃 120s 포함).\n')
+
+
+probe_table()
+
 kept = [r for r in rows if r['verdict'] == 'KEPT_UP']
 sat = [r for r in rows if r['verdict'] == 'SATURATED']
 ceiling = max((int(r['rate']) for r in kept), default=None)

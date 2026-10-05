@@ -20,6 +20,22 @@
 #   NETWORK=infra_default  LOADGEN_IMAGE=collectors-binance-collector:latest
 #   COLLECTORS_DIR=/home/capstone01/capstone/collectors
 #   APP_C=stockflow-realtime  KAFKA_C=stockflow-kafka  REDIS_C=stockflow-redis  PG_C=stockflow-timescaledb
+#
+# 시뮬레이터 부하 모드 (LOADGEN_MODE=sim, 기본 loadgen = 합성 loadgen.py 그대로):
+#   loadgen.py 대신 stock_simulator.py(SIM_RATE_MODE=realistic)를 HOLD 초 동안 돌려 실제 미국 주식
+#   종목·가격대의 체결 흐름으로 부하를 준다. 라벨은 SIM_SOURCE_LABEL(기본 SIMLOAD)로 분리돼 나중에
+#   source 한 가지로 지울 수 있다. 측정 중에는 라이브 시뮬레이터(stockflow-stock-simulator)를 반드시
+#   멈춘다(COLLECTORS 기본 목록에 포함) — DB 는 라벨(SIMULATOR/SIMLOAD)로 구분되지만 Redis
+#   price:latest:{symbol} 은 심볼 키라 두 시뮬레이터가 섞이기 때문.
+#     SIM_CODE_DIR=/home/capstone01/sim-code/collectors  SIM_CPUS=2  SIM_SOURCE_LABEL=SIMLOAD
+#     SIM_BASE_TPS=832.479   # universe.csv 105종목 합계 평균 TPS. SIM_RATE_SCALE = rate / SIM_BASE_TPS
+#   effective_rate 는 시뮬레이터 최종 통계 "전송: N건" 을 HOLD 로 나눈 값이라, 컨테이너 기동·시작가
+#   로딩에 걸리는 몇 초만큼 실제 발생률보다 약간 낮게(보수적으로) 나온다.
+#
+# 분석 API 응답시간 프로브 (ANALYSIS_PROBE=1, 기본 0):
+#   각 rate 의 hold 동안 ANALYSIS_PROBE_INTERVAL(15)초마다 /api/predictions/<SYM>/compare 를 순차 1건씩
+#   호출해 $OUT/analysis_probe.csv(timestamp,rate,symbol,http,seconds)에 기록하고 SUMMARY.md 에 표로 정리.
+#     ANALYSIS_PROBE_SYMBOLS="AAPL NVDA MSFT TSLA SPY"  ANALYSIS_PROBE_SOURCE=SIMULATOR
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,12 +56,22 @@ LOADGEN_IMAGE=${LOADGEN_IMAGE:-collectors-binance-collector:latest}
 COLLECTORS_DIR=${COLLECTORS_DIR:-/home/capstone01/capstone/collectors}
 PERF_DIR="$SCRIPT_DIR"
 
+LOADGEN_MODE=${LOADGEN_MODE:-loadgen}
+SIM_CODE_DIR=${SIM_CODE_DIR:-/home/capstone01/sim-code/collectors}
+SIM_CPUS=${SIM_CPUS:-2}
+SIM_SOURCE_LABEL=${SIM_SOURCE_LABEL:-SIMLOAD}
+SIM_BASE_TPS=${SIM_BASE_TPS:-832.479}
+ANALYSIS_PROBE=${ANALYSIS_PROBE:-0}
+ANALYSIS_PROBE_INTERVAL=${ANALYSIS_PROBE_INTERVAL:-15}
+ANALYSIS_PROBE_SYMBOLS=${ANALYSIS_PROBE_SYMBOLS:-"AAPL NVDA MSFT TSLA SPY"}
+ANALYSIS_PROBE_SOURCE=${ANALYSIS_PROBE_SOURCE:-SIMULATOR}
+
 APP_URL=${APP_URL:-http://localhost:8081}
 APP_C=${APP_C:-stockflow-realtime}
 KAFKA_C=${KAFKA_C:-stockflow-kafka}
 REDIS_C=${REDIS_C:-stockflow-redis}
 PG_C=${PG_C:-stockflow-timescaledb}
-COLLECTORS=${COLLECTORS:-"stockflow-binance-collector stockflow-alpaca-collector"}
+COLLECTORS=${COLLECTORS:-"stockflow-binance-collector stockflow-alpaca-collector stockflow-stock-simulator"}
 KAFKA_BOOTSTRAP=${KAFKA_BOOTSTRAP:-localhost:9092}
 TOPIC=${TOPIC:-market.normalized}
 REALTIME_GROUP=${REALTIME_GROUP:-realtime-group}
@@ -54,6 +80,7 @@ STORAGE_GROUP=${STORAGE_GROUP:-storage-group}
 OUT="$SCRIPT_DIR/results/sweep_${LABEL}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUT"
 export APP_URL APP_C KAFKA_C REDIS_C PG_C KAFKA_BOOTSTRAP REALTIME_GROUP STORAGE_GROUP
+export ANALYSIS_PROBE_INTERVAL ANALYSIS_PROBE_SYMBOLS ANALYSIS_PROBE_SOURCE
 
 log() { echo -e "\033[1;36m[$(date +%H:%M:%S)]\033[0m $*"; }
 app_prom() { curl -s --max-time 10 "$APP_URL/actuator/prometheus" 2>/dev/null; }
@@ -95,13 +122,55 @@ consumed_total() {  # $1=realtime|storage  $2=스냅샷 .prom 파일
   { grep '^kafka_consumer_fetch_manager_records_consumed_total{' "$2" || true; } | { grep "$1-group" || true; } | prom_sum
 }
 
-run_loadgen() {  # $1=rate $2=duration $3=logfile
+run_loadgen_synthetic() {  # $1=rate $2=duration $3=logfile
   docker run --rm --network "$NETWORK" \
     -v "$COLLECTORS_DIR":/app -v "$PERF_DIR":/perf -w /app \
     -e PYTHONPATH=/app -e KAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
     -e RATE="$1" -e DURATION="$2" -e WORKERS="$WORKERS" -e SYMBOLS="$SYMBOLS" \
     -e BATCH_TICK_MS=5 -e TOPIC="$TOPIC" \
     "$LOADGEN_IMAGE" python /perf/loadgen.py > "$3" 2>&1
+}
+
+sim_scale() {  # $1=목표 rate → SIM_RATE_SCALE (소수 6자리)
+  awk -v r="$1" -v b="$SIM_BASE_TPS" 'BEGIN{printf "%.6f", r/b}'
+}
+sim_effective_line() {  # $1=로그 $2=duration → 최종 "전송: N건" 으로 effective_rate=<N/duration> 한 줄 (없으면 무출력)
+  local n
+  n=$(grep -oE '전송: [0-9][0-9,]*건' "$1" 2>/dev/null | tail -1 | grep -oE '[0-9][0-9,]*' | tr -d ',' || true)
+  [ -n "$n" ] && awk -v n="$n" -v d="$2" 'BEGIN{printf "effective_rate=%.1f\n", n/d}'
+  return 0
+}
+run_loadgen_sim() {  # $1=rate $2=duration $3=logfile
+  local rc=0 scale
+  scale=$(sim_scale "$1")
+  # timeout 은 SIGTERM 으로 시뮬레이터를 끝내고(최종 통계 출력) 종료코드 124 를 돌려준다 — 정상 종료.
+  docker run --rm --network "$NETWORK" \
+    -v "$SIM_CODE_DIR":/app:ro -w /app \
+    -e PYTHONPATH=/app -e PYTHONDONTWRITEBYTECODE=1 \
+    -e KAFKA_BOOTSTRAP_SERVERS=kafka:9092 -e KAFKA_TOPIC_NAME="$TOPIC" \
+    -e SIM_RATE_MODE=realistic -e SIM_MARKET_HOURS=always -e SIM_PRICE_SOURCE=static \
+    -e SIM_SOURCE_LABEL="$SIM_SOURCE_LABEL" -e SIM_RATE_SCALE="$scale" \
+    --cpus "$SIM_CPUS" \
+    "$LOADGEN_IMAGE" timeout -k 15 "$2" python stock_simulator.py > "$3" 2>&1 || rc=$?
+  echo "sim_scale=$scale target_rate=$1 duration=$2 exit=$rc" >> "$3"
+  sim_effective_line "$3" "$2" >> "$3"
+  [ "$rc" = 0 ] || [ "$rc" = 124 ] || [ "$rc" = 143 ]
+}
+run_loadgen() {  # $1=rate $2=duration $3=logfile
+  if [ "$LOADGEN_MODE" = sim ]; then run_loadgen_sim "$@"; else run_loadgen_synthetic "$@"; fi
+}
+
+# 분석 API 프로브(백그라운드, 순차 1건): hold 동안만 돌고 stop_probe/cleanup 에서 반드시 죽인다.
+PROBE_PID=""
+start_probe() {  # $1=rate
+  [ "$ANALYSIS_PROBE" = 1 ] || return 0
+  "$SCRIPT_DIR/analysis_probe.sh" "$1" "$OUT/analysis_probe.csv" & PROBE_PID=$!
+}
+stop_probe() {
+  [ -n "$PROBE_PID" ] || return 0
+  kill "$PROBE_PID" 2>/dev/null || true
+  wait "$PROBE_PID" 2>/dev/null || true
+  PROBE_PID=""
 }
 
 wait_health() {
@@ -116,6 +185,8 @@ wait_health() {
 {
   echo "# TPS 스윕 환경  $(date -Is)"
   echo "label=$LABEL rates=$RATES hold=${HOLD}s workers=$WORKERS"
+  [ "$LOADGEN_MODE" = sim ] && echo "loadgen_mode=sim label=$SIM_SOURCE_LABEL base_tps=$SIM_BASE_TPS cpus=$SIM_CPUS code=$SIM_CODE_DIR"
+  [ "$ANALYSIS_PROBE" = 1 ] && echo "analysis_probe=1 interval=${ANALYSIS_PROBE_INTERVAL}s symbols=$ANALYSIS_PROBE_SYMBOLS"
   echo; echo "== host =="; echo "nproc=$(nproc)"; free -h; uname -a; uptime
   echo; echo "== kafka topic =="
   docker exec "$KAFKA_C" kafka-topics --bootstrap-server "$KAFKA_BOOTSTRAP" --describe --topic "$TOPIC" 2>/dev/null
@@ -159,6 +230,7 @@ fi
 cleanup() {
   set +e
   [ -n "${SAMPLER_PID:-}" ] && kill "$SAMPLER_PID" 2>/dev/null
+  [ -n "${PROBE_PID:-}" ] && kill "$PROBE_PID" 2>/dev/null
   for c in $STOPPED; do docker start "$c" >/dev/null 2>&1 && log "재기동: $c"; done
 }
 trap cleanup EXIT
@@ -201,6 +273,7 @@ sampler & SAMPLER_PID=$!
 
 # ── 4. rate 스윕 ───────────────────────────────────────────────
 echo "rate,effective_send,consume_realtime,consume_storage,peak_lag_rt,end_lag_rt,drain_s,verdict" > "$OUT/summary.csv"
+[ "$ANALYSIS_PROBE" = 1 ] && echo "timestamp,rate,symbol,http,seconds" > "$OUT/analysis_probe.csv"
 for RATE in $RATES; do
   log "════════ rate=$RATE msg/s (${HOLD}s) ════════"
   setphase snapA "$RATE"
@@ -210,7 +283,9 @@ for RATE in $RATES; do
   a_st=$(consumed_total storage "$OUT/${RATE}_A.prom")
 
   setphase hold "$RATE"
+  start_probe "$RATE"
   run_loadgen "$RATE" "$HOLD" "$OUT/${RATE}_loadgen.log" || log "!! loadgen 비정상 종료"
+  stop_probe
   b_epoch=$(date +%s)
   eff=$(grep -oE 'effective_rate=[0-9.]+' "$OUT/${RATE}_loadgen.log" | tail -1 | cut -d= -f2)
   log "loadgen 완료. 실효 ≈ ${eff:-?} msg/s"
