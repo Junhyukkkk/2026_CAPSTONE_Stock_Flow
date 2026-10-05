@@ -25,7 +25,7 @@ public class SymbolSourceResolver {
             SELECT source FROM ohlcv_1m
             WHERE symbol = ? AND bucket >= now() - interval '3 days'
             GROUP BY source
-            ORDER BY max(bucket) DESC
+            ORDER BY max(bucket) DESC, source ASC
             LIMIT 1
             """;
 

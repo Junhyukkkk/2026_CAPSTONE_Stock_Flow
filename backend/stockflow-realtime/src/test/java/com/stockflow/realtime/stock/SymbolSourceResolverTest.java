@@ -48,7 +48,7 @@ class SymbolSourceResolverTest {
         assertThat(sql.getValue())
                 .contains("bucket >= now() - interval '3 days'")
                 .contains("symbol = ?")
-                .contains("ORDER BY max(bucket) DESC")
+                .contains("ORDER BY max(bucket) DESC, source ASC")
                 .contains("LIMIT 1")
                 .doesNotContain("AAPL");
     }
