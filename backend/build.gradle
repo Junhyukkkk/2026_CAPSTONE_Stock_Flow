@@ -50,4 +50,18 @@ subprojects {
             html.required = true
         }
     }
+
+    // 커버리지 하한(80%) 검증: ./gradlew jacocoTestCoverageVerification
+    // check 에는 연결하지 않아 기존 빌드/CI 동작은 바뀌지 않는다.
+    jacocoTestCoverageVerification {
+        dependsOn test
+        violationRules {
+            rule {
+                limit {
+                    counter = 'LINE'
+                    minimum = 0.80
+                }
+            }
+        }
+    }
 }
