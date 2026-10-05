@@ -12,6 +12,7 @@
 #         1f814a5=1000,2000,3000,4000,5000 \
 #         30c7a5a=2000,4000,6000,8000,9000,10000
 #
+# DROP_ENV(정규식)=운영 env 에서 뺄 줄, APP_CPUSET=시험 앱 컨테이너를 고정할 코어(예: 0-5, 분석 예약 코어 회피).
 # rate 를 생략하면 RATES 환경변수(없으면 tps-sweep.sh 기본값)를 쓴다.
 # HOLD / DRAIN_WAIT 등 나머지 환경변수는 tps-sweep.sh 로 그대로 전달된다.
 # 어떤 ref 가 기동에 실패하면 그 ref 만 FAILED 로 기록하고 다음으로 넘어간다.
@@ -79,6 +80,11 @@ wait_up() {  # $1=timeout(s)
 docker inspect "$LIVE" --format '{{range .Config.Env}}{{println .}}{{end}}' \
   | grep -vE '^(PATH|HOME|HOSTNAME|JAVA_HOME|JAVA_VERSION|LANG|LC_ALL|TERM)=' | grep -v '^$' \
   > "$OUT/rt.env"
+# 운영 env 에 고정된 옛 값이 새 기본값을 덮어쓰면 "새 기본값 측정"이 안 되므로, 정규식에 맞는 줄은 뺀다.
+#   예) DROP_ENV='^(STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE|KAFKA_CONSUMER_MAX_POLL_RECORDS)='
+if [ -n "${DROP_ENV:-}" ]; then
+  { grep -vE "$DROP_ENV" "$OUT/rt.env" || true; } > "$OUT/rt.env.tmp" && mv "$OUT/rt.env.tmp" "$OUT/rt.env"
+fi
 LIVE_IMAGE=$(docker inspect "$LIVE" --format '{{.Config.Image}}')
 log "결과 → $OUT   (원래 이미지: $LIVE_IMAGE, env $(wc -l < "$OUT/rt.env")줄)"
 
@@ -127,7 +133,7 @@ for spec in "$@"; do
     docker stop "$LIVE" >/dev/null; docker rename "$LIVE" "$BACKUP"
   fi
   reset_offsets
-  docker run -d --name "$LIVE" --network "$NETWORK" -p 8081:8081 \
+  docker run -d --name "$LIVE" --network "$NETWORK" -p 8081:8081 ${APP_CPUSET:+--cpuset-cpus "$APP_CPUSET"} \
     --env-file "$OUT/rt.env" "$img" >/dev/null
   if ! wait_up 300; then
     log "!! 기동 실패 (5분) → $OUT/$short.start.log"
