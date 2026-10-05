@@ -56,8 +56,14 @@ docker compose run --rm market-data-sync python -m app.backfill minute --symbols
 실측(BTC, 2022-01~): 1분봉 249만 행 285초, 압축 전 544MB → 후 126MB. 100종목이면 압축 후 최대 약 12.6GB,
 순차 약 8시간이다. 결측 80분은 2023-03-24 Binance 현물 거래 중단 구간이라 거래소에도 데이터가 없다.
 
-> 주의: `TOP:100` 은 **현재** 살아 있는 종목만 고르므로 상장폐지된 코인이 빠지는 생존 편향이 있다.
-> 종목 간 비교 연구에는 일봉(`ALL`)을 쓰는 편이 낫다.
+> 주의: `TOP:100` 과 일봉 `ALL` 은 **현재** 거래 중인 종목만 고르므로 상장폐지된 코인이 빠지는 생존 편향이 있다.
+> 종목 간 비교 연구에는 아래 상장폐지 일봉을 함께 적재한다.
+
+```bash
+# 상장폐지 코인 일봉: 아카이브(data.binance.vision)에서 적재 (레버리지 토큰·스테이블·법정화폐·래핑/금 토큰 제외)
+docker compose run --rm market-data-sync python -m app.backfill daily-archive --symbols DELISTED
+docker compose run --rm market-data-sync python -m app.backfill daily-archive --symbols ANCUSDT,WAVESUSDT   # 목록 지정
+```
 
 종목마다 `data_coverage` 에 보유 범위와 결측 수가 기록된다. 한 종목이 실패해도 나머지는 계속 진행하고,
 같은 명령을 다시 돌리면 바뀐 행만 갱신된다.

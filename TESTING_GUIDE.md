@@ -3,9 +3,11 @@
 ## 1. Kafka UI로 확인
 
 ### 접속 방법
-브라우저에서 접속:
-```
-http://114.71.51.41:8989
+Kafka UI 는 외부에 열려 있지 않고 기본 기동도 안 된다. 서버에서 켠 뒤 SSH 터널로 접속한다 ([RUNBOOK.md §1](RUNBOOK.md)):
+```bash
+docker compose --profile kafka-ui up -d kafka-ui     # 서버 ~/capstone/backend/infra
+ssh -p 22000 -N -L 8989:localhost:8989 capstone01@114.71.51.41   # 내 PC
+# 브라우저: http://localhost:8989 (다 쓰면 docker compose stop kafka-ui)
 ```
 
 ### 확인할 내용
@@ -25,6 +27,12 @@ docker logs -f stockflow-binance-collector
 ```
 - 실시간으로 메시지 전송 로그 확인
 - 통계 정보 확인 (전송 건수, 속도 등)
+
+### Producer 로그 (주식 시뮬레이터, `--profile sim` 으로 켠 경우)
+```bash
+docker logs -f stockflow-stock-simulator 2>&1 | grep -E "합계 평균 TPS|📊"
+```
+- 시작 로그의 `합계 평균 TPS` = 기대 속도, `📊` 줄 = 주기 통계 (종료 시 `최종 통계`)
 
 ### Consumer 로그 (Spring Boot)
 ```bash
@@ -98,6 +106,14 @@ curl http://114.71.51.41:8081/actuator/metrics
 ```bash
 curl http://114.71.51.41:8081/api/metrics
 ```
+
+### 예측 호출과 이력 저장 확인
+```bash
+curl "http://114.71.51.41:8081/api/predictions/AAPL/compare?interval=1m&horizon=10&source=SIMULATOR"
+curl "http://114.71.51.41:8081/api/predictions/AAPL/history?interval=1m&limit=5"   # 방금 호출한 결과가 저장돼 있어야 함
+```
+- 해당 `(symbol, source)` 1분봉이 50개 미만이면 예측이 안 나온다. 모델 캐시가 없는 종목의 첫 호출은 10~15초.
+- 저장은 비동기라 직후 조회에서 한두 번 비어 있을 수 있다. 계속 비면 큐 포화 카운터 `prediction_history_dropped_total` 확인.
 
 ---
 

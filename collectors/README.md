@@ -84,14 +84,16 @@ collectors/
 환산하므로 (fixed + always 와 달리) 일 변동성이 2배로 부풀지 않는다. 장중 변동성은 거래 강도에 비례해 개장·마감 직후 커진다.
 
 ### 운영 부하 (용량 안내)
-> ⚠️ **realistic · scale 1.0 은 서버에 부담이 크다.** 105종목 합계 평균 약 **832 TPS**(하루 약 2,000만 건, `always` 면 약 7,000만 건)다.
-> 체결마다 Redis 멱등성 키(현재 코드 기본 TTL 24시간)와 DB 행이 하나씩 생겨, 압축 전 기준 DB 가 하루 수 GB 씩 늘고
-> Redis 멱등성 키가 메모리 한계를 넘어 축출될 위험이 있다. **서버에 올릴 때는 `SIM_RATE_SCALE` 로 낮추거나
-> 저장 경로 최적화(멱등성 키 TTL 단축 등)를 먼저 적용할 것.**
+> ⚠️ **realistic · scale 1.0 은 DB 를 빠르게 키운다.** 105종목 합계 평균 약 **832 TPS**(하루 약 2,000만 건, `always` 면 약 7,000만 건)다.
+> 체결마다 DB 행이 하나씩 생겨 압축 전 기준 DB 가 하루 수 GB 씩 늘고, 단일 HDD 서버에서는 대량 삭제·집계 갱신이 iowait 를 만든다
+> ([RUNBOOK.md §8](../RUNBOOK.md)). Redis 멱등성 키는 기본 TTL 10분(`STOCKFLOW_IDEMPOTENCY_TTL_SECONDS`)이라 누적량이 10분치로 제한된다(옛 기본값 86400초로 되돌리면 2GB Redis 가 가득 차 키가 축출된다).
+> 용량 한계: 앱은 시뮬레이터 부하 약 12,000/s 까지 적체 없이 소화한다([OPTIMIZATION_HISTORY.md](../backend/perf/OPTIMIZATION_HISTORY.md), 2026-10-05 코드·단일 서버).
+> 장기 가동 시 `SIM_RATE_SCALE` 로 DB 증가량을 정한다.
 
 compose(`backend/infra`·`collectors`)의 기본값은 `SIM_RATE_MODE=realistic`, **`SIM_RATE_SCALE=0.25`**(서버 보호용 기본값, 합계 평균 약 208 TPS)이다.
 `SIM_TOTAL_TPS`(compose 기본 `100`, 코드 기본 `300`)는 `fixed` 모드 전용이다. 기본 `SIM_MARKET_HOURS=always` + scale 0.25 이면 하루 약 1,800만 건이므로
 라이브 스택에서는 `SIM_RATE_SCALE` 을 더 낮추거나 `SIM_MARKET_HOURS=us` 를 권장한다.
+(현재 학교 서버의 라이브 시뮬레이터는 의도적으로 `SIM_RATE_SCALE=1.0`·`always` 로 운영한다. 디스크 여유는 3.2TB 이고 압축 전 증가량을 모니터링한다. 줄이려면 §운영 절차에서 컨테이너를 낮춘 값으로 다시 띄운다.)
 
 `fixed` + `always` 는 변동성을 거래 초당 기준으로 스케일하면서 24시간 내내 돌기 때문에 일봉 변동성이 현실의 약 2배다(`realistic` 은 이 한계가 없다).
 시뮬레이션 데이터의 지표·백테스트는 의미가 없다.
@@ -105,6 +107,14 @@ compose(`backend/infra`·`collectors`)의 기본값은 `SIM_RATE_MODE=realistic`
 > - 한 프로세스 용량을 넘는 속도가 필요하면 **시뮬레이터 프로세스를 여러 개** 띄우고 `SIM_RATE_SCALE` 을 나눠 준다
 >   (예: 합계 scale 60 → 프로세스 3개 × 20). `SIM_SOURCE_LABEL` 은 프로세스마다 달리하거나 같게 해도 된다 —
 >   `tradeId` 의 run_id 가 기동마다 달라 겹치지 않으며, 같은 라벨이면 `source` 한 번으로 한꺼번에 정리할 수 있다.
+
+### 분석(예측) 연동
+예측 API 는 `(symbol, source)` 마다 1분봉이 50개 이상(`analysis/app/service.py` `MIN_OBS`) 있어야 동작한다.
+`SIM_MARKET_HOURS=us` 면 장외·주말에는 봉이 쌓이지 않으므로, 켠 뒤 약 1시간(`always` 기준) 지나야 예측이 나온다.
+모델 캐시가 없는 종목의 첫 호출은 학습 때문에 10~15초, 이후 약 1초([OPTIMIZATION_HISTORY.md §5](../backend/perf/OPTIMIZATION_HISTORY.md)).
+
+### 부하 테스트 데이터 정리
+`SIM_SOURCE_LABEL=SIMLOAD` 로 만든 테스트 데이터는 끝난 뒤 지운다. 순서와 SQL 은 [RUNBOOK.md §8](../RUNBOOK.md).
 
 ### 실행
 기본 `docker compose up` 에는 포함되지 않고 `sim` 프로파일에서만 기동한다.
@@ -198,12 +208,12 @@ docker-compose up -d
 
 ```json
 {
-  "source": "BINANCE" | "ALPACA",
+  "source": "BINANCE" | "ALPACA" | "SIMULATOR",
   "symbol": "BTCUSDT" | "AAPL",
   "price": "50000.12345678",
   "volume": "1.5",
   "tradeId": "unique-trade-id",
-  "exchange": "BINANCE" | "IEX",
+  "exchange": "BINANCE" | "IEX" | "SIM",
   "timestamp": 1234567890123,
   "receivedAt": 1234567890124,
   "marketType": "CRYPTO" | "STOCK"
@@ -213,6 +223,7 @@ docker-compose up -d
 ## Kafka Topics
 
 - `market.normalized`: Binance/Alpaca 공통 정규화 시세 (12 파티션, 4시간 retention). Consumer가 구독하는 유일한 시세 토픽.
+- `market.retry`: 재시도 대기 메시지 (6 파티션, 4시간 retention)
 - `market.dlq`: Dead Letter Queue - 실패한 메시지 (3 파티션, 7일 retention)
 
 토픽은 `backend/infra/docker-compose.yml`의 `kafka-setup` 서비스가 기동 시 자동 생성한다.
@@ -261,9 +272,6 @@ docker-compose up -d
 ### 테스트
 
 ```bash
-# 단위 테스트 (추후 추가 예정)
-pytest tests/
-
-# 통합 테스트
-python -m pytest tests/integration/
+pip install -r requirements.txt -r requirements-dev.txt
+pytest tests/        # 설정·정규화·시뮬레이터(universe/generator/realistic/price_seed/runner)
 ```

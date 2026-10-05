@@ -18,7 +18,7 @@
 - **부하**: 미국 주식 시뮬레이터(`SIM_RATE_MODE=realistic`, 105종목, 실제 종목·가격대·체결 흐름, Poisson 도착)를
   Kafka `market.normalized` 에 직접 투입. 합성 `loadgen.py`(50개 가짜 종목) 대신 쓰며, `source=SIMLOAD` 로 운영 데이터와 분리.
 - **방식**: rate 마다 90초 유지 → Kafka consumer lag·소비량 샘플링 → 부하 종료 후 배수 시간. 도구 `tps-sweep.sh` / `revision-sweep.sh`.
-- **조건 고정**: 파티션 12, Redis 2GB(가득 차 키 축출 중), 앱 컨테이너·부하기는 코어 0–5, 분석 서비스는 코어 6–7 예약. 실수집기·라이브 시뮬레이터 정지. 시점마다 오프셋을 최신으로 리셋(lag 0 출발).
+- **조건 고정**: 파티션 12, Redis 2GB(측정한 세 버전 모두 가득 차 키 축출이 있었다 — 결과표의 `Redis 축출Δ`), 앱 컨테이너·부하기는 코어 0–5, 분석 서비스는 코어 6–7 예약. 실수집기·라이브 시뮬레이터 정지. 시점마다 오프셋을 최신으로 리셋(lag 0 출발).
 - **읽는 법**: "소비"는 90초 평균이라 램프업이 섞여 전송량의 약 88~90%로 보인다(따라가고 있어도). 그래서 판단은 소비율 + peak lag + 배수 시간으로 한다.
 - **한계**: 90초 단일 표본 ±10%, 공용 서버라 시간대에 따라 절대값이 최대 2배 흔들림 → **같은 시간대에 연속 측정한 상대 비교만** 근거로 쓴다.
 
@@ -68,6 +68,7 @@
 
 ## 6. 반영 상태·주의
 
-- 코드: 브랜치 `perf/storage-path-opts`(`fae1466`) — **main 미병합, 운영 컨테이너는 아직 구버전**. 라이브 서버는 멱등성 TTL 24시간이라 Redis 가 2GB 가득 차 키를 계속 축출 중이다(시뮬레이터 상시 가동으로 심화). 병합·배포 시 TTL 10분으로 해소.
-- 배포 전 서버 `backend/infra/.env`·컨테이너 env 에 `STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=false` 같은 옛 고정값이 남아 있으면 새 기본값을 덮어쓴다(이번 측정은 해당 줄을 빼고 수행: `DROP_ENV`).
+- 상태: 저장 경로 최적화(#47)·예측 이력(#48)·시뮬레이터(#49)·스윕 도구(#50)는 10/5 에 main 으로 병합되고 서버에 배포됐다(이미지 `stockflow-app:local`, Flyway V17 적용). 롤백용 이미지는 `stockflow-app:pre-deploy-20261005`.
+- 배포 후 효과: 멱등성 TTL 24시간 → 10분으로 Redis 키 수가 줄어 메모리가 2.0GB(가득, 키 축출 중) → 1.3GB 로 내려갔다. 서버 `.env` 에 있던 `STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=false` 고정값은 새 기본값(true)을 덮어쓰므로 제거했다(백업 `.env.bak.20261005`).
+- 롤백: 같은 env 에 옛 값(`STOCKFLOW_IDEMPOTENCY_TTL_SECONDS=86400`, `KAFKA_STORAGE_MAX_POLL_RECORDS=100` 등, JDBC 플래그는 `SPRING_DATASOURCE_URL` 재지정).
 - 모든 수치는 시뮬레이터 부하(105종목)·단일 서버·공용 자원 위의 측정이다. 실제 미국 전 종목 체결량이 이 부하와 같다는 뜻이 아니다.
