@@ -34,7 +34,7 @@ Producer → Kafka Topic → Consumer Group 1 (실시간용) → Redis
 
 저장 경로 묶음(TTL 600s + 저장 배치 500/64KB/100ms + `reWriteBatchedInserts` + Lettuce 풀 48 + Hikari 24 + 멱등성 파이프라인)은
 합쳐서 켤 때만 효과가 있다: 합성 부하 10,000/s 에서 저장 소비 6,000 → 9,000/s, 시뮬레이터 부하에서 저장 상한 약 6,600 → 약 14,000/s
-([OPTIMIZATION_HISTORY.md §4](../perf/OPTIMIZATION_HISTORY.md)). 서버 `backend/infra/.env` 나 컨테이너 env 에 옛 고정값
+([OPTIMIZATION_HISTORY.md §2](../perf/OPTIMIZATION_HISTORY.md)). 서버 `backend/infra/.env` 나 컨테이너 env 에 옛 고정값
 (예: `STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=false`)이 남아 있으면 새 기본값을 덮어쓴다.
 
 ---

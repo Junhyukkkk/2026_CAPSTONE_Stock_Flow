@@ -111,7 +111,7 @@ compose(`backend/infra`·`collectors`)의 기본값은 `SIM_RATE_MODE=realistic`
 ### 분석(예측) 연동
 예측 API 는 `(symbol, source)` 마다 1분봉이 50개 이상(`analysis/app/service.py` `MIN_OBS`) 있어야 동작한다.
 `SIM_MARKET_HOURS=us` 면 장외·주말에는 봉이 쌓이지 않으므로, 켠 뒤 약 1시간(`always` 기준) 지나야 예측이 나온다.
-모델 캐시가 없는 종목의 첫 호출은 학습 때문에 10~15초, 이후 약 1초([OPTIMIZATION_HISTORY.md §5](../backend/perf/OPTIMIZATION_HISTORY.md)).
+모델 캐시가 없는 종목의 첫 호출은 학습 때문에 10~15초, 이후 약 1초([OPTIMIZATION_HISTORY.md §4](../backend/perf/OPTIMIZATION_HISTORY.md)).
 
 ### 부하 테스트 데이터 정리
 `SIM_SOURCE_LABEL=SIMLOAD` 로 만든 테스트 데이터는 끝난 뒤 지운다. 순서와 SQL 은 [RUNBOOK.md §8](../RUNBOOK.md).
