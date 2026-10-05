@@ -10,6 +10,7 @@
 ├── collectors/                # 데이터 수집 계층 (Python)
 │   ├── binance_producer.py    # Binance 암호화폐 데이터 수집
 │   ├── alpaca_producer.py     # Alpaca 주식 데이터 수집
+│   ├── stock_simulator.py     # 미국 주식 시뮬레이터 (가짜 체결 생성, simulator/ 하위 모듈)
 │   ├── config.py              # 설정 관리
 │   ├── normalizer.py          # 데이터 정규화
 │   ├── kafka_producer.py      # Kafka Producer 래퍼
@@ -26,23 +27,23 @@
 │   ├── infra/                  # docker compose 인프라 전체
 │   │   ├── docker-compose.yml  # TimescaleDB, Kafka, Redis, Prometheus, Grafana, Loki, Alertmanager 등
 │   │   ├── create-topics.sh    # Kafka Topic 수동 생성 스크립트
-│   │   └── README.md           # 인프라 상세 문서
-│   ├── perf/                   # 파이프라인 부하 테스트/병목 측정 하네스
-│   │   └── README.md
-│   └── docs/                   # Grafana 대시보드 정의, 아키텍처/운영 메모
+│   │   └── reserve-analysis-capacity.sh  # 분석 컨테이너 CPU·메모리 예약
+│   ├── perf/                   # 처리량 스윕 도구 + 측정 결과 문서
+│   └── docs/                   # Grafana 대시보드 정의 (JSON)
 │
+├── analysis/                  # 예측 서비스 (Python/FastAPI: ARIMA·Chronos-Bolt)
+├── market-data-sync/          # 캔들(ohlcv_1m·일봉) 동기화·거래소 백필·결측 복구
 ├── RUNBOOK.md                  # 운영 서버(114.71.51.41) 조작 가이드
 ├── TESTING_GUIDE.md             # Kafka/Consumer 동작 확인 가이드
 └── README.md
 ```
 
-> 참고: 시계열 예측 서비스(`stockflow-analysis`, FastAPI/ARIMA)는 이 저장소와 별도로 운영된다.
-
 ## 주요 구성 요소
 
 ### 1. 데이터 수집 계층 (Python)
 - **Binance Collector**: 거래 중인 USDT 마켓 코인 전 종목 실시간 수집, 자동 재연결/백오프
-- **Alpaca Collector**: IEX 거래소 주식 실시간 수집
+- **Alpaca Collector**: IEX 거래소 주식 실시간 수집 (compose 프로파일 `alpaca`)
+- **주식 시뮬레이터**: 미국 주식 105종목의 가짜 체결을 Kafka 로 전송 (`source=SIMULATOR`, compose 프로파일 `sim`). 실제 시세가 아니다 → [collectors/README.md](collectors/README.md#주식-시세-시뮬레이터)
 - **데이터 정규화**: 모든 데이터를 `NormalizedTradeDTO` 형식으로 통일해 Kafka로 전송
 
 ### 2. 스트리밍 계층 (Kafka)
@@ -54,7 +55,8 @@
 - 실시간/저장 경로를 별도 프로세스(`--profile split`)로 분리 배포 가능
 
 ### 4. 데이터 저장 계층 (TimescaleDB)
-- Flyway 마이그레이션(V1~V12)으로 스키마 관리, 하이퍼테이블/연속 집계/압축·보관 정책 적용
+- Flyway 마이그레이션(V1~V17)으로 스키마 관리, 하이퍼테이블/연속 집계/압축·보관 정책 적용
+- 예측 결과 이력: `/api/predictions/{symbol}/compare` 호출 결과를 `prediction_runs`·`prediction_forecast_points` 에 비동기 저장(V17), `GET /api/predictions/{symbol}/history` 로 조회
 
 ### 5. 배치 & 백테스팅 (`stockflow-realtime` 내 `batch`, `backtest` 패키지)
 - Spring Batch 기반 일일 기술적 지표 계산
@@ -81,7 +83,7 @@ cp .env.example .env          # 대부분 기본값으로 동작, 필요 시 DIS
 docker compose up -d --build  # 첫 실행은 앱 이미지 빌드 때문에 몇 분 소요
 ```
 
-기동되는 것 (요약, 상세는 [backend/infra/README.md](backend/infra/README.md) 참조):
+기동되는 것 (요약, 전체 서비스·프로파일은 [backend/infra/docker-compose.yml](backend/infra/docker-compose.yml) 참조):
 
 | 서비스 | 주소 | 설명 |
 | --- | --- | --- |
@@ -124,13 +126,22 @@ cd backend
 
 ## 부하 테스트 / 성능 측정
 
-`backend/perf`에 파이프라인 병목 측정 하네스가 있다 (초당 2천~1만 건 스윕, 개선 옵션 on/off 비교).
-자세한 내용은 [backend/perf/README.md](backend/perf/README.md) 참조.
+`backend/perf` 에 처리량 스윕 도구가 있다. 실행법은 [backend/perf/SERVER_TEST.md](backend/perf/SERVER_TEST.md),
+측정 결과와 최적화 효과는 [backend/perf/OPTIMIZATION_HISTORY.md](backend/perf/OPTIMIZATION_HISTORY.md).
+
+| 코드 시점 | 지연 없이 따라가는 최대 rate | 조건 |
+|---|---:|---|
+| 2026-07-08 | 약 2,000/s | 시뮬레이터 부하(105종목), 같은 서버·같은 조건에서 이미지만 교체 |
+| 2026-09-21 | 약 6,000/s (저장 상한 약 6,600/s) | 〃 |
+| 2026-10-05 | 약 12,000/s (20,000/s 에서 포화) | 〃 |
+
+단일 서버(8코어·15GB·HDD 1개) 기준이며 90초 단일 표본(±10%)이다. 같은 시간대에 이어서 잰 상대 비교로만 읽는다.
 
 ## 운영 문서
 
-- [RUNBOOK.md](RUNBOOK.md): 운영 서버 접속, 스택 조작, Discord 경보, 장애 대응
+- [RUNBOOK.md](RUNBOOK.md): 운영 서버 접속, 스택 조작, 시뮬레이터·테스트 데이터 정리, Discord 경보, 장애 대응
 - [TESTING_GUIDE.md](TESTING_GUIDE.md): Kafka/Consumer 동작을 직접 확인하는 방법
+- [backend/perf/SERVER_TEST.md](backend/perf/SERVER_TEST.md): 처리량 스윕 실행 · [OPTIMIZATION_HISTORY.md](backend/perf/OPTIMIZATION_HISTORY.md): 측정 결과
 
 ## 데이터 형식
 
@@ -138,12 +149,12 @@ cd backend
 
 ```json
 {
-  "source": "BINANCE" | "ALPACA",
+  "source": "BINANCE" | "ALPACA" | "SIMULATOR",
   "symbol": "BTCUSDT" | "AAPL",
   "price": "50000.12345678",
   "volume": "1.5",
   "tradeId": "unique-trade-id",
-  "exchange": "BINANCE" | "IEX",
+  "exchange": "BINANCE" | "IEX" | "SIM",
   "timestamp": 1234567890123,
   "receivedAt": 1234567890124,
   "marketType": "CRYPTO" | "STOCK"
@@ -166,6 +177,7 @@ DISCORD_WEBHOOK=            # Alertmanager → Discord 경보 웹훅 (선택)
 SENTRY_DSN=                 # 에러 트래킹 (선택, --profile sentry)
 ```
 전체 옵션은 [backend/infra/.env.example](backend/infra/.env.example) 참조.
+저장 경로 튜닝 값(`STOCKFLOW_IDEMPOTENCY_TTL_SECONDS` 등)의 기본값과 되돌리는 법은 [CONSUMER_DESIGN.md §5](backend/stockflow-realtime/CONSUMER_DESIGN.md).
 
 ### 백엔드(Java) — compose 없이 로컬 실행 시
 ```bash
@@ -182,8 +194,10 @@ REDIS_PORT=6379
 ## 개발 가이드
 
 - 데이터 수집기: [collectors/README.md](collectors/README.md)
-- 인프라: [backend/infra/README.md](backend/infra/README.md)
-- 부하 테스트: [backend/perf/README.md](backend/perf/README.md)
+- 예측 서비스: [analysis/README.md](analysis/README.md)
+- 캔들 동기화: [market-data-sync/README.md](market-data-sync/README.md)
+- 인프라: [backend/infra/docker-compose.yml](backend/infra/docker-compose.yml)
+- 부하 테스트: [backend/perf/SERVER_TEST.md](backend/perf/SERVER_TEST.md)
 
 ## 기술 스택
 

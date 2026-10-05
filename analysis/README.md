@@ -93,6 +93,22 @@ python -m app.scripts.backfill_binance_daily \
 | POST | `/train/{symbol}?interval=1m&limit=2000` | 학습 후 저장 |
 | GET | `/models/{symbol}?interval=1m` | 저장 모델 메타데이터 |
 
+### Spring 경유 API (`stockflow-realtime`, 8081)
+
+화면·외부 호출은 위 FastAPI 를 직접 부르지 않고 Spring 을 거친다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| GET | `/api/predictions/{symbol}/compare?interval=1m&horizon=10&source=` | 세 모델 비교(`/predict/{symbol}/compare` 프록시). 응답은 **비동기로 DB 에 자동 저장** |
+| GET | `/api/predictions/{symbol}/history?interval=1m&limit=20` | 저장된 예측 이력, 기준 봉 시각 내림차순 (`limit` 최대 200, 기본 20) |
+
+- 저장 테이블: `prediction_runs`(실행 헤더, `(symbol, interval, horizon, source, base_ts)` 유니크) · `prediction_forecast_points`(모델별 예측점) — Flyway V17.
+- 저장은 별도 스레드·유한 큐(기본 1000)로 처리해 응답 지연에 영향이 없다. 큐가 가득 차면 버리고 카운터 `prediction.history.dropped` 가 오른다.
+- `PREDICTION_HISTORY_ENABLED=false` 면 저장을 끄고 `history` 는 빈 배열을 돌려준다(기본 true).
+- 학습에 필요한 최소 관측치는 **50개**(`app/service.py` `MIN_OBS`)다. 시뮬레이터(`source=SIMULATOR`) 종목은 켠 뒤 1분봉이 50개 쌓이는 약 1시간 뒤부터 예측이 나온다.
+- 부하 중 응답: 첫 호출(모델 학습) 10~15초, 이후 중앙값 0.7~1.1초 (파이프라인 4,000~20,000/s 부하, [OPTIMIZATION_HISTORY.md §5](../backend/perf/OPTIMIZATION_HISTORY.md)).
+- 서버에서는 `backend/infra/reserve-analysis-capacity.sh` 로 이 컨테이너에 코어 6–7·메모리 3GB 를 예약한다(컨테이너 재생성 후 재실행, [RUNBOOK.md](../RUNBOOK.md)).
+
 예시
 
 ```bash

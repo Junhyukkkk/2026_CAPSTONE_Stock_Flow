@@ -12,7 +12,7 @@ market.<purpose>
 - `<purpose>`: 토픽의 역할 (normalized, retry, dlq)
 
 ### 예시
-- `market.normalized`: 정규화된 통합 시세 (Python Producer가 정규화 후 전송, 모든 Consumer가 구독)
+- `market.normalized`: 정규화된 통합 시세 (Binance·Alpaca 수집기와 주식 시뮬레이터가 정규화 후 전송, 모든 Consumer가 구독)
 - `market.retry`: Consumer 처리 실패 후 재시도 큐
 - `market.dlq`: Dead Letter Queue (최종 실패 메시지)
 
@@ -30,7 +30,7 @@ market.<purpose>
 
 | Topic | 파티션 수 | 이유 |
 |-------|----------|------|
-| `market.normalized` | 12 | 통합 시세, Consumer concurrency(12)와 일치 |
+| `market.normalized` | 12 | 통합 시세, Consumer concurrency(12)와 일치. 12파티션에서 시뮬레이터 부하 약 12,000/s 까지 적체 없음([OPTIMIZATION_HISTORY.md](../backend/perf/OPTIMIZATION_HISTORY.md), 2026-10-05 코드) |
 | `market.retry` | 6 | 재시도 메시지는 상대적으로 적음 |
 | `market.dlq` | 3 | 실패 메시지는 상대적으로 적음 |
 
@@ -96,7 +96,7 @@ market.dlq: 604800000 (7일)
 4. **Partition Size**: 파티션별 메시지 수
 
 ### Kafka UI
-- URL: http://localhost:8989
+- 기본 기동되지 않는다. 서버에서 `docker compose --profile kafka-ui up -d kafka-ui` 후 SSH 터널(`-L 8989:localhost:8989`)로 http://localhost:8989 접속 ([RUNBOOK.md §1](../RUNBOOK.md)).
 - Topic별 상세 메트릭 확인 가능
 
 ## 8. 확장 전략
