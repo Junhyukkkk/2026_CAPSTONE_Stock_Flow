@@ -7,6 +7,7 @@
 #   예) ./opt-flag-sweep.sh optflags 7000 \
 #         STOCKFLOW_OPT_REDIS_PIPELINE STOCKFLOW_OPT_INSTRUMENT_CACHE
 #
+# APP_CPUSET=0-5 로 시험 앱 컨테이너를 코어에 고정, EXTRA_ENV='K=V;K2=V2' 로 baseline env 를 덮어쓴다.
 # baseline(현재 env 그대로, 보통 전부 true)을 가장 먼저 재고, 그다음 플래그마다 그 값만
 # false 로 바꿔서 같은 rate 로 잰다. HOLD/DRAIN_WAIT/SETTLE 은 환경변수로 조절 가능
 # (기본 90/90/10 — revision-sweep 의 180/150/30 보다 짧게 잡아 여러 플래그를 빠르게 돈다).
@@ -64,6 +65,18 @@ add_spring_redis_pw() {  # $1=env 파일 (값은 로그에 찍지 않는다)
   chmod 600 "$1"
 }
 
+# EXTRA_ENV="K=V;K2=V2" — 운영 env 에 없던 값(예: 옛 운영 시점의 고정값)을 env 파일에 덮어쓴다
+apply_extra_env() {  # $1=env 파일
+  [ -n "${EXTRA_ENV:-}" ] || return 0
+  local kv k; IFS=';' read -ra _kvs <<< "$EXTRA_ENV"
+  for kv in "${_kvs[@]}"; do
+    k=${kv%%=*}
+    { grep -v "^${k}=" "$1" || true; } > "$1.tmp" && mv "$1.tmp" "$1"
+    echo "$kv" >> "$1"
+  done
+  chmod 600 "$1"
+}
+
 wait_up() {  # $1=timeout(s)
   local n=$(( $1 / 3 ))
   for _ in $(seq 1 "$n"); do
@@ -78,6 +91,7 @@ docker inspect "$LIVE" --format '{{range .Config.Env}}{{println .}}{{end}}' \
   | grep -vE '^(PATH|HOME|HOSTNAME|JAVA_HOME|JAVA_VERSION|LANG|LC_ALL|TERM)=' | grep -v '^$' \
   > "$OUT/base.env"
 add_spring_redis_pw "$OUT/base.env"
+apply_extra_env "$OUT/base.env"
 log "베이스 이미지: $IMAGE, rate=$RATE, hold=${HOLD}s, env $(wc -l < "$OUT/base.env")줄 → $OUT"
 
 # binance-collector 를 restore() 까지 계속 정지 — 실 트래픽이 오프셋 리셋 뒤에 새로 쌓여
@@ -91,7 +105,7 @@ run_one() {  # $1=런이름  $2=env파일
     docker stop "$LIVE" >/dev/null; docker rename "$LIVE" "$BACKUP"
   fi
   reset_offsets
-  docker run -d --name "$LIVE" --network "$NETWORK" -p 8081:8081 --env-file "$2" "$IMAGE" >/dev/null
+  docker run -d --name "$LIVE" --network "$NETWORK" -p 8081:8081 ${APP_CPUSET:+--cpuset-cpus "$APP_CPUSET"} --env-file "$2" "$IMAGE" >/dev/null
   if ! wait_up 300; then
     log "!! 기동 실패 → $1"
     docker logs --tail 100 "$LIVE" > "$OUT/$1.start.log" 2>&1 || true
