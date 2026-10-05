@@ -239,7 +239,8 @@ public class BacktestRunService {
             throw new NoDataException("선택한 구간의 1분봉이 연속적이지 않습니다. 누락 구간을 채운 뒤 다시 실행해주세요.");
         }
 
-        Map<String, Object> params = request.getParams() == null ? Map.of() : new LinkedHashMap<>(request.getParams());
+        Map<String, Object> params = request.getParams() == null
+                ? new LinkedHashMap<>() : new LinkedHashMap<>(request.getParams());
         if (request.getFeeBps() != null) {
             params.put("feeBps", request.getFeeBps());
         }
