@@ -8,6 +8,8 @@
 collectors/
 ├── binance_producer.py    # Binance 암호화폐 데이터 수집
 ├── alpaca_producer.py     # Alpaca 주식 데이터 수집
+├── stock_simulator.py     # 미국 주식 시세 시뮬레이터 (가짜 체결 생성)
+├── simulator/             # 시뮬레이터 모듈 (종목 CSV, 가격 모델, 시작가 로더)
 ├── config.py              # 설정 관리
 ├── normalizer.py          # 데이터 정규화 (NormalizedTradeDTO)
 ├── kafka_producer.py      # Kafka Producer 래퍼
@@ -36,6 +38,51 @@ collectors/
 - **에러 처리**: 강력한 예외 처리 및 재시도 로직
 - **메트릭**: 전송 통계, 성공률, 속도 모니터링
 - **설정 외부화**: 환경 변수 기반 설정 관리
+
+## 주식 시세 시뮬레이터
+
+> ⚠️ **가짜 데이터 경고** — 시뮬레이터가 만드는 체결은 전부 시뮬레이션이다. 실제 시세가 아니다.
+> 이 데이터로 얻은 분석·백테스트·수익률 결과는 실제 시장에 대한 결론으로 해석하면 안 된다.
+> (시작가만 선택적으로 Alpaca 실제 시세를 읽어 쓰며, 이후의 가격 움직임·수량·체결 시각은 모두 무작위 생성이다.)
+
+### 목적
+미국 주식 전 종목 실시간 수집은 Alpaca 유료 플랜이 필요해 예산상 어렵다. 이를 대체해, 대형주·ETF 약 100개가
+실제 주식처럼(종목별 유동성에 비례한 체결 빈도, 변동성 있는 가격) 움직이는 체결을 Kafka 로 쏴 준다.
+기존 파이프라인(`market.normalized` → Redis/WebSocket/TimescaleDB)은 코드 변경 없이 STOCK 으로 처리한다.
+
+### 구분 방법
+모든 메시지는 `source="SIMULATOR"`, `exchange="SIM"`, `marketType="STOCK"` 이다. 실제 `ALPACA`/`IEX` 데이터와
+섞여도 `source` 로 걸러낼 수 있다. `tradeId` 는 `SIM-{symbol}-{run_id}-{seq}` 이며 재시작해도 겹치지 않는다.
+
+### 실행
+기본 `docker compose up` 에는 포함되지 않고 `sim` 프로파일에서만 기동한다.
+
+```bash
+# backend/infra 또는 collectors 디렉터리에서
+docker compose --profile sim up -d stock-simulator
+
+# 로컬 dry-run: Kafka 없이 stdout 에 JSON 한 줄씩 출력 (로그는 stderr)
+SIM_DRY_RUN=true SIM_SEED=1 SIM_TOTAL_TPS=50 python stock_simulator.py
+```
+
+### 주요 환경 변수
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `SIM_TOTAL_TPS` | `300` | 전 종목 합계 초당 체결 수 (종목별 빈도는 `weight` 비례, 포아송 도착) |
+| `SIM_MARKET_HOURS` | `always` | `always` 또는 `us` (`us` = 미국 동부시간 월~금 09:30~16:00 에만 전송, 휴장일 미반영) |
+| `SIM_PRICE_SOURCE` | `static` | 시작가 출처. `static`=CSV 그대로, `alpaca`=Alpaca 스냅샷의 최신 체결가, `auto`=키가 있으면 alpaca 시도 |
+| `SIM_SEED` | (없음) | 지정하면 같은 가격·수량 시퀀스 재현 (`tradeId` 의 run_id 는 기동마다 다름) |
+| `SIM_DRY_RUN` | `false` | `true` 면 Kafka 대신 stdout 에 출력 |
+| `SIM_TICK_INTERVAL_MS` | `50` | 체결 생성 스케줄러 간격 (1~2000) |
+| `SIM_SYMBOLS_FILE` | `simulator/universe.csv` | 종목 CSV (`symbol,price,volatility,weight`) |
+| `ALPACA_API_KEY` / `ALPACA_API_SECRET` | (없음) | 시작가 읽기용(선택). 체결 전송에는 쓰이지 않는다 |
+
+### 시작가 로더 (`SIM_PRICE_SOURCE`)
+`alpaca`/`auto` 는 `GET https://data.alpaca.markets/v2/stocks/snapshots?feed=iex` (타임아웃 10초, 50종목씩) 로
+`latestTrade.p` → `dailyBar.c` → `prevDailyBar.c` 순으로 시작가를 읽는다. 아래 경우는 해당 종목(또는 전체)이
+예외 없이 CSV 가격으로 폴백한다: 키 없음(`auto` 는 요청 자체를 하지 않음), 네트워크 오류·타임아웃, 401/403(즉시 중단),
+5xx·빈 응답·예상 밖 JSON, 응답에 없는 종목, 0 이하이거나 CSV 가격의 0.2~5배 밖인 가격.
 
 ## 설정
 

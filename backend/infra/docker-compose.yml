@@ -356,6 +356,34 @@ services:
       - kafka
     restart: unless-stopped
 
+  # ---- 미국 주식 시세 시뮬레이터 (가짜 체결 생성기, 유료 시세 대체) ----
+  # ⚠️ source=SIMULATOR / exchange=SIM 인 시뮬레이션 데이터다. 실제 시세가 아니므로 분석·백테스트 해석에 주의.
+  # 실행: docker compose --profile sim up -d stock-simulator   (기본 up 에는 포함되지 않는다)
+  # SIM_PRICE_SOURCE=auto|alpaca 이면 ALPACA_API_KEY/SECRET 으로 시작가만 실제 시세에서 읽는다(실패 시 CSV 가격).
+  stock-simulator:
+    build:
+      context: ../../collectors
+      dockerfile: Dockerfile
+    container_name: stockflow-stock-simulator
+    command: python stock_simulator.py
+    profiles: ["sim"]
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC_NAME=market.normalized
+      - SIM_SYMBOLS_FILE=${SIM_SYMBOLS_FILE:-simulator/universe.csv}
+      - SIM_TOTAL_TPS=${SIM_TOTAL_TPS:-300}
+      - SIM_MARKET_HOURS=${SIM_MARKET_HOURS:-always}
+      - SIM_SEED=${SIM_SEED:-}
+      - SIM_DRY_RUN=${SIM_DRY_RUN:-false}
+      - SIM_TICK_INTERVAL_MS=${SIM_TICK_INTERVAL_MS:-50}
+      - SIM_PRICE_SOURCE=${SIM_PRICE_SOURCE:-static}
+      - ALPACA_API_KEY=${ALPACA_API_KEY:-}
+      - ALPACA_API_SECRET=${ALPACA_API_SECRET:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - kafka
+    restart: unless-stopped
+
   # ---- 캔들 동기화 · 거래소 백필 · 결측 복구 (market-data-sync/README.md) ----
   # ohlcv_1m 스키마(V16)는 stockflow-realtime 의 Flyway 가 만든다. 스키마가 생기기 전의 실패는
   # 작업마다 로그만 남기고 다음 주기에 다시 시도한다.

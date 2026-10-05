@@ -17,6 +17,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 from config import Config
 from simulator.generator import BASE36, SOURCE, TradeGenerator, to_base36
 from simulator.market_clock import is_us_market_open
+from simulator.price_seed import seed_prices
 from simulator.universe import Instrument, load_universe
 
 # 로깅 설정
@@ -162,8 +163,9 @@ async def main():
         except RuntimeError as e:
             logger.error(f"❌ {e}")
             sys.exit(1)
-    if Config.SIM_PRICE_SOURCE != 'static':
-        logger.warning(f"⚠️ SIM_PRICE_SOURCE={Config.SIM_PRICE_SOURCE} 는 아직 지원하지 않아 static(CSV 시작가)을 사용합니다")
+    instruments = seed_prices(
+        instruments, Config.SIM_PRICE_SOURCE, Config.ALPACA_API_KEY, Config.ALPACA_API_SECRET
+    )
 
     producer = None
     if not Config.SIM_DRY_RUN:
