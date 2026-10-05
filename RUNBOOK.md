@@ -68,8 +68,8 @@ ssh -p 22000 -N -L 3000:localhost:3000 -L 9090:localhost:9090 -L 9093:localhost:
 | 비밀번호 | 서버 `backend/infra/.env` 의 `REDIS_PASSWORD` (저장소에는 없음). 비우면 인증 없이 기동 — 로컬 개발 전용 |
 | 접근 | 포트는 `127.0.0.1:6379` 만. 컨테이너 안 `docker exec stockflow-redis redis-cli …` 는 `REDISCLI_AUTH` 로 자동 인증 |
 | 클라이언트 | 앱(realtime/storage)·redis-exporter·glitchtip 이 같은 변수 사용. RedisInsight 는 접속 정보에 비밀번호를 직접 입력 |
-| 비밀번호 변경 | `.env` 수정 → `docker compose --profile metrics up -d redis stockflow-realtime redis-exporter` |
-| Redis 재생성 후 | 캐시가 비므로 `POST /api/batch/prev-close-sync` 로 전일 종가를 다시 적재(안 하면 등락률 0%) |
+| 비밀번호 변경 | `.env` 수정 → `docker compose --profile metrics up -d redis stockflow-realtime redis-exporter`. `split` 프로파일을 쓰면 `stockflow-storage`, `sentry` 프로파일을 쓰면 glitchtip 도 함께 재생성 |
+| Redis 재생성 후 | 캐시가 비므로 서버에서 `curl -X POST http://localhost:8081/api/batch/prev-close-sync` 로 전일 종가를 다시 적재(안 하면 등락률 0%). 응답의 `loadedSymbols` 가 0 이 아니어야 한다 |
 
 - 2026-09-20 에는 인증 없는 Redis 가 외부 봇에 replica 로 바뀌어(`READONLY You can't write against a read only replica`) 쓰기가 전부 막혔다. 같은 증상이면 `redis-cli info replication` 에서 `role:slave` 인지 먼저 본다.
 - 인증 확인: `docker exec stockflow-redis env -u REDISCLI_AUTH redis-cli ping` 이 `NOAUTH` 여야 한다.
@@ -87,7 +87,13 @@ ssh -p 22000 -N -L 3000:localhost:3000 -L 9090:localhost:9090 -L 9093:localhost:
 | `KAFKA_STORAGE_MAX_POLL_RECORDS` / `_FETCH_MIN_BYTES` / `_FETCH_MAX_WAIT_MS` | 500 / 65536 / 100 |
 | `REDIS_PIPELINE_FLUSH` / `STOCKFLOW_E2E_SAMPLE_EVERY` | `each` / 1 |
 
-`backend/infra/.env` 나 컨테이너 env 에 옛 고정값(예: `STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=false`, TTL 86400)이 남아 있으면 기본값을 덮어쓴다.
+`backend/infra/.env` 나 컨테이너 env 에 옛 고정값이 남아 있으면 기본값을 덮어쓴다. 아래 명령이 **아무것도 출력하지 않아야** 한다:
+
+```bash
+grep -nE '^(STOCKFLOW_OPT_STORAGE_IDEMPOTENCY_PIPELINE=false|STOCKFLOW_IDEMPOTENCY_TTL_SECONDS=86400|KAFKA_STORAGE_(MAX_POLL_RECORDS=100|FETCH_MIN_BYTES=1|FETCH_MAX_WAIT_MS=500))' ~/capstone/backend/infra/.env
+```
+
+env 로 보이지 않는 `application.yml` 값 확인: Hikari 24 → `curl -s localhost:8081/actuator/metrics/hikaricp.connections.max`, JDBC 옵션 → `docker logs stockflow-realtime 2>&1 | grep -m1 'reWriteBatchedInserts'`(Flyway 시작 로그). Lettuce 풀 48 은 `application.yml` 의 `spring.data.redis.lettuce.pool.max-active` 로만 확인된다.
 
 ```bash
 # 파티션 12개
@@ -132,7 +138,7 @@ docker compose down -v                    # 정지 + 데이터 삭제 (주의)
 
 앱 코드 갱신:
 - **자동**: `main` 에 병합(직접 push 포함)되면 `.github/workflows/deploy.yml` 이 빌드·테스트 후 서버에 SSH 로 접속해
-  `git reset --hard origin/main` → `docker compose --profile metrics --profile alpaca up -d --build` 를 실행한다.
+  `git reset --hard origin/main` → `docker compose --profile metrics up -d --build` → `reserve-analysis-capacity.sh` 를 실행한다(Alpaca 수집기는 켜지 않는다. `analysis/` 는 별도 compose 라 배포 대상이 아니다: 분석 코드가 바뀌면 `cd ~/capstone/analysis && docker compose up -d --build`).
   서버(HDD·공용)의 이미지 빌드가 10분을 넘기므로 SSH 단계 timeout 은 40분이다. 배포는 한 번에 하나씩 순서대로 돈다.
 - **수동**:
   ```bash
@@ -153,7 +159,7 @@ KAFKA_STORAGE_MAX_POLL_RECORDS=100
 KAFKA_STORAGE_FETCH_MIN_BYTES=1
 KAFKA_STORAGE_FETCH_MAX_WAIT_MS=500
 ```
-(Lettuce 풀 48·Hikari 24·`reWriteBatchedInserts` 는 `application.yml` 고정값이라 env 로 못 되돌린다.)
+Lettuce 풀·Hikari·JDBC 옵션은 `application.yml` 기본값이지만 Spring 환경변수로 덮어쓸 수 있다: `SPRING_DATA_REDIS_LETTUCE_POOL_MAX_ACTIVE`, `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE`, `SPRING_DATASOURCE_URL`(끝의 `?reWriteBatchedInserts=true` 를 빼고 지정).
 
 ---
 
@@ -186,7 +192,8 @@ docker compose up -d
 ```bash
 cd ~/capstone/backend/perf
 # 시뮬레이터 부하(source=SIMLOAD) + 분석 API 응답시간 프로브
-LOADGEN_MODE=sim ANALYSIS_PROBE=1 RATES="4000 8000 12000" ./tps-sweep.sh sim1
+~/capstone/backend/infra/reserve-analysis-capacity.sh          # 분석=코어 6,7 예약(먼저)
+LOADGEN_MODE=sim SIM_CPUSET=0-5 ANALYSIS_PROBE=1 RATES="4000 8000 12000" ./tps-sweep.sh sim1
 cat results/sweep_sim1_*/SUMMARY.md
 ```
 
@@ -222,9 +229,9 @@ curl -s -XPOST localhost:9093/api/v2/alerts -H 'Content-Type: application/json' 
 | "화면 도달 시간" 음수 | 서버 시계 오차 (NTP 미동기, 관리자 권한 필요). 지표만 이상, 실제 처리는 정상 |
 | `iowait` 급증·앱 전체가 느려짐 | 단일 HDD 서버. 대량 `DELETE`·연속 집계 갱신이 원인이면 중단하고 작은 시간 조각으로 나눠 다시(§8) |
 | Redis `evicted_keys` 증가 | `maxmemory 2gb allkeys-lru`. 멱등성 TTL 이 600 인지 §2 로 확인(옛 값 86400 이면 가득 참) |
-| 예측 API 가 비거나 오류 | 해당 `(symbol, source)` 1분봉이 50개 미만이면 학습 안 됨(시뮬레이터는 켠 뒤 약 1시간). 첫 호출은 학습으로 10~15초 |
-| 예측 이력이 안 쌓임 | `PREDICTION_HISTORY_ENABLED` 확인, `prediction_history_dropped_total` 지표(큐 포화) 확인 |
-| CD 배포가 중간에 실패 | Actions 로그의 SSH 단계. 이미지 빌드가 10분을 넘기는 서버라 timeout 은 40분(`deploy.yml`) |
+| 예측 API 가 비거나 오류 | HTTP 404 `예측에 필요한 시세 데이터가 부족합니다` = 해당 `(symbol, source)` 1분봉 50개 미만(시뮬레이터는 켠 뒤 약 1시간, `SIM_MARKET_HOURS=us` 면 장중에만). 503 `예측 서비스에 연결할 수 없습니다` = analysis 컨테이너 확인. 502 = 분석 서비스가 빈/잘못된 응답. 첫 호출은 학습으로 10~15초(Java 읽기 timeout 120초). 시뮬레이터 종목 추가는 `collectors/simulator/universe.csv` 에 행을 추가하고 컨테이너 재시작 |
+| 예측 이력이 안 쌓임 | `PREDICTION_HISTORY_ENABLED` 확인, `prediction_history_dropped_total` 지표(큐 포화) 확인. 조회: `GET /api/predictions/{symbol}/history?interval=1m&limit=20`(파라미터는 interval·limit 만). 직접 보기: `SELECT symbol, interval, source, base_ts, requested_at, latency_ms FROM prediction_runs ORDER BY requested_at DESC LIMIT 10;` |
+| CD 배포가 중간에 실패·timeout | ① Actions 로그의 SSH 단계 확인(서버는 이미지 빌드가 10분 넘음, timeout 40분). ② 서버에서 `docker ps -a` 로 멈춘 컨테이너(`Exited`)와 이름이 `해시_이름` 인 `Created` 임시 컨테이너를 찾아, 멈춘 것은 `docker start`, 임시 것은 `docker rm`. ③ 재실행은 Actions → Deploy to server → Run workflow(`workflow_dispatch`) 또는 §3 수동 절차. ④ 끝나면 `reserve-analysis-capacity.sh`, Redis 가 재생성됐다면 `prev-close-sync`, 시뮬레이터가 떠 있고 `stockflow-alpaca-collector` 는 꺼져 있는지 확인 |
 | 배포 뒤 분석 응답이 느려짐 | 컨테이너가 재생성돼 CPU 예약이 풀렸다 → `./reserve-analysis-capacity.sh` (§3) |
 | 전체 재시작 | `cd ~/capstone/backend/infra && docker compose restart` |
 
