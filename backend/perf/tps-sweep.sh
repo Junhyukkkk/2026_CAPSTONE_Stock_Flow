@@ -29,13 +29,19 @@
 #   price:latest:{symbol} 은 심볼 키라 두 시뮬레이터가 섞이기 때문.
 #     SIM_CODE_DIR=/home/capstone01/sim-code/collectors  SIM_CPUS=2  SIM_SOURCE_LABEL=SIMLOAD
 #     SIM_BASE_TPS=832.479   # universe.csv 105종목 합계 평균 TPS. SIM_RATE_SCALE = rate / SIM_BASE_TPS
-#   effective_rate 는 시뮬레이터 최종 통계 "전송: N건" 을 HOLD 로 나눈 값이라, 컨테이너 기동·시작가
-#   로딩에 걸리는 몇 초만큼 실제 발생률보다 약간 낮게(보수적으로) 나온다.
+#     SIM_CPUSET=            # 비우면 고정 안 함. 예: SIM_CPUSET=0-5 → 부하 생성기를 해당 코어에만 고정
+#                            # (분석 서비스용으로 예약한 코어를 피하려는 용도; docker run --cpuset-cpus 로 전달)
+#   effective_rate 는 시뮬레이터 "📊 최종 통계 | … | 전송: N건" 줄(그 줄만; 주기 통계 줄은 무시)을 HOLD 로
+#   나눈 값이라, 컨테이너 기동·시작가 로딩에 걸리는 몇 초만큼 실제 발생률보다 약간 낮게(보수적으로) 나온다.
+#   최종 통계 줄이 없으면(설정 오류·크래시·강제종료 등) effective_rate 를 만들지 않아 판정은 "?" 가 된다.
+#   시뮬레이터 컨테이너 이름은 stockflow-loadgen-sim-<스윕 PID> 로 고정되고 종료 시 cleanup 이 강제 제거한다.
 #
 # 분석 API 응답시간 프로브 (ANALYSIS_PROBE=1, 기본 0):
 #   각 rate 의 hold 동안 ANALYSIS_PROBE_INTERVAL(15)초마다 /api/predictions/<SYM>/compare 를 순차 1건씩
 #   호출해 $OUT/analysis_probe.csv(timestamp,rate,symbol,http,seconds)에 기록하고 SUMMARY.md 에 표로 정리.
 #     ANALYSIS_PROBE_SYMBOLS="AAPL NVDA MSFT TSLA SPY"  ANALYSIS_PROBE_SOURCE=SIMULATOR
+#     ANALYSIS_PROBE_WARMUP=10   # LOADGEN_MODE=sim 일 때만: 첫 호출을 hold 시작 N초 뒤로 미룸(시뮬레이터
+#                                # 컨테이너가 뜨기 전 무부하 표본이 섞이는 편향 방지). sim 이 아니면 항상 0.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -61,6 +67,8 @@ SIM_CODE_DIR=${SIM_CODE_DIR:-/home/capstone01/sim-code/collectors}
 SIM_CPUS=${SIM_CPUS:-2}
 SIM_SOURCE_LABEL=${SIM_SOURCE_LABEL:-SIMLOAD}
 SIM_BASE_TPS=${SIM_BASE_TPS:-832.479}
+SIM_CPUSET=${SIM_CPUSET:-}
+SIM_CONTAINER="stockflow-loadgen-sim-$$"
 ANALYSIS_PROBE=${ANALYSIS_PROBE:-0}
 ANALYSIS_PROBE_INTERVAL=${ANALYSIS_PROBE_INTERVAL:-15}
 ANALYSIS_PROBE_SYMBOLS=${ANALYSIS_PROBE_SYMBOLS:-"AAPL NVDA MSFT TSLA SPY"}
@@ -80,7 +88,8 @@ STORAGE_GROUP=${STORAGE_GROUP:-storage-group}
 OUT="$SCRIPT_DIR/results/sweep_${LABEL}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUT"
 export APP_URL APP_C KAFKA_C REDIS_C PG_C KAFKA_BOOTSTRAP REALTIME_GROUP STORAGE_GROUP
-export ANALYSIS_PROBE_INTERVAL ANALYSIS_PROBE_SYMBOLS ANALYSIS_PROBE_SOURCE
+if [ "$LOADGEN_MODE" = sim ]; then ANALYSIS_PROBE_WARMUP=${ANALYSIS_PROBE_WARMUP:-10}; else ANALYSIS_PROBE_WARMUP=0; fi
+export ANALYSIS_PROBE_INTERVAL ANALYSIS_PROBE_SYMBOLS ANALYSIS_PROBE_SOURCE ANALYSIS_PROBE_WARMUP
 
 log() { echo -e "\033[1;36m[$(date +%H:%M:%S)]\033[0m $*"; }
 app_prom() { curl -s --max-time 10 "$APP_URL/actuator/prometheus" 2>/dev/null; }
@@ -134,9 +143,9 @@ run_loadgen_synthetic() {  # $1=rate $2=duration $3=logfile
 sim_scale() {  # $1=목표 rate → SIM_RATE_SCALE (소수 6자리)
   awk -v r="$1" -v b="$SIM_BASE_TPS" 'BEGIN{printf "%.6f", r/b}'
 }
-sim_effective_line() {  # $1=로그 $2=duration → 최종 "전송: N건" 으로 effective_rate=<N/duration> 한 줄 (없으면 무출력)
-  local n
-  n=$(grep -oE '전송: [0-9][0-9,]*건' "$1" 2>/dev/null | tail -1 | grep -oE '[0-9][0-9,]*' | tr -d ',' || true)
+sim_effective_line() {  # $1=로그 $2=duration → "최종 통계" 줄의 "전송: N건" 으로 effective_rate=<N/duration> 한 줄 (없으면 무출력)
+  local n   # 주기 "📊 통계 | 전송:" 줄은 중간값이라 쓰지 않는다 — 최종 통계 줄만.
+  n=$(grep -E '최종 통계' "$1" 2>/dev/null | grep -oE '전송: [0-9][0-9,]*건' | tail -1 | grep -oE '[0-9][0-9,]*' | tr -d ',' || true)
   [ -n "$n" ] && awk -v n="$n" -v d="$2" 'BEGIN{printf "effective_rate=%.1f\n", n/d}'
   return 0
 }
@@ -144,13 +153,13 @@ run_loadgen_sim() {  # $1=rate $2=duration $3=logfile
   local rc=0 scale
   scale=$(sim_scale "$1")
   # timeout 은 SIGTERM 으로 시뮬레이터를 끝내고(최종 통계 출력) 종료코드 124 를 돌려준다 — 정상 종료.
-  docker run --rm --network "$NETWORK" \
+  docker run --rm --name "$SIM_CONTAINER" --network "$NETWORK" \
     -v "$SIM_CODE_DIR":/app:ro -w /app \
     -e PYTHONPATH=/app -e PYTHONDONTWRITEBYTECODE=1 \
     -e KAFKA_BOOTSTRAP_SERVERS=kafka:9092 -e KAFKA_TOPIC_NAME="$TOPIC" \
     -e SIM_RATE_MODE=realistic -e SIM_MARKET_HOURS=always -e SIM_PRICE_SOURCE=static \
     -e SIM_SOURCE_LABEL="$SIM_SOURCE_LABEL" -e SIM_RATE_SCALE="$scale" \
-    --cpus "$SIM_CPUS" \
+    --cpus "$SIM_CPUS" ${SIM_CPUSET:+--cpuset-cpus "$SIM_CPUSET"} \
     "$LOADGEN_IMAGE" timeout -k 15 "$2" python stock_simulator.py > "$3" 2>&1 || rc=$?
   echo "sim_scale=$scale target_rate=$1 duration=$2 exit=$rc" >> "$3"
   sim_effective_line "$3" "$2" >> "$3"
@@ -185,7 +194,7 @@ wait_health() {
 {
   echo "# TPS 스윕 환경  $(date -Is)"
   echo "label=$LABEL rates=$RATES hold=${HOLD}s workers=$WORKERS"
-  [ "$LOADGEN_MODE" = sim ] && echo "loadgen_mode=sim label=$SIM_SOURCE_LABEL base_tps=$SIM_BASE_TPS cpus=$SIM_CPUS code=$SIM_CODE_DIR"
+  [ "$LOADGEN_MODE" = sim ] && echo "loadgen_mode=sim label=$SIM_SOURCE_LABEL base_tps=$SIM_BASE_TPS cpus=$SIM_CPUS cpuset=${SIM_CPUSET:-none} code=$SIM_CODE_DIR"
   [ "$ANALYSIS_PROBE" = 1 ] && echo "analysis_probe=1 interval=${ANALYSIS_PROBE_INTERVAL}s symbols=$ANALYSIS_PROBE_SYMBOLS"
   echo; echo "== host =="; echo "nproc=$(nproc)"; free -h; uname -a; uptime
   echo; echo "== kafka topic =="
@@ -231,6 +240,7 @@ cleanup() {
   set +e
   [ -n "${SAMPLER_PID:-}" ] && kill "$SAMPLER_PID" 2>/dev/null
   [ -n "${PROBE_PID:-}" ] && kill "$PROBE_PID" 2>/dev/null
+  [ "$LOADGEN_MODE" = sim ] && docker rm -f "$SIM_CONTAINER" >/dev/null 2>&1
   for c in $STOPPED; do docker start "$c" >/dev/null 2>&1 && log "재기동: $c"; done
 }
 trap cleanup EXIT
@@ -287,7 +297,7 @@ for RATE in $RATES; do
   run_loadgen "$RATE" "$HOLD" "$OUT/${RATE}_loadgen.log" || log "!! loadgen 비정상 종료"
   stop_probe
   b_epoch=$(date +%s)
-  eff=$(grep -oE 'effective_rate=[0-9.]+' "$OUT/${RATE}_loadgen.log" | tail -1 | cut -d= -f2)
+  eff=$(grep -oE 'effective_rate=[0-9.]+' "$OUT/${RATE}_loadgen.log" | tail -1 | cut -d= -f2 || true)   # 줄이 없으면(sim 실패 등) grep 이 1 → pipefail 로 스윕이 죽지 않게; eff 비면 판정 "?"
   log "loadgen 완료. 실효 ≈ ${eff:-?} msg/s"
 
   setphase drain "$RATE"
