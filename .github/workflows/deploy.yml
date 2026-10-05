@@ -41,6 +41,8 @@ jobs:
           port: 22000
           username: capstone01
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          # 서버(HDD·공용)에서 이미지 빌드가 10분을 넘겨 기본 timeout(10m)에 걸려 배포가 실패했다
+          command_timeout: 40m
           script: |
             set -e
             cd ~/capstone
