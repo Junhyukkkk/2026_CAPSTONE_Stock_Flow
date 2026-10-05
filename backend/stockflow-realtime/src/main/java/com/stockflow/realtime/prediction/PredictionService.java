@@ -1,6 +1,7 @@
 package com.stockflow.realtime.prediction;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.stockflow.realtime.stock.SymbolSourceResolver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -21,6 +22,7 @@ public class PredictionService {
     private final RestClient client;
     private final PredictionHistoryRecorder historyRecorder;
     private final boolean historyEnabled;
+    private final SymbolSourceResolver symbolSourceResolver;
 
     public PredictionService(
             RestClient.Builder builder,
@@ -28,8 +30,10 @@ public class PredictionService {
             @Value("${analysis.connect-timeout-ms:3000}") int connectTimeoutMs,
             @Value("${analysis.read-timeout-ms:120000}") int readTimeoutMs,
             PredictionHistoryRecorder historyRecorder,
-            @Value("${prediction.history.enabled:true}") boolean historyEnabled) {
+            @Value("${prediction.history.enabled:true}") boolean historyEnabled,
+            SymbolSourceResolver symbolSourceResolver) {
         this.historyRecorder = historyRecorder;
+        this.symbolSourceResolver = symbolSourceResolver;
         this.historyEnabled = historyEnabled;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
@@ -40,7 +44,12 @@ public class PredictionService {
                 .build();
     }
 
-    public JsonNode compare(String symbol, String interval, int horizon, String source) {
+    public JsonNode compare(String symbol, String interval, int horizon, String requestedSource) {
+        // 분봉은 같은 심볼의 여러 출처가 섞이지 않도록 서버가 출처를 정한다. 일봉(symbol_daily_ohlcv)은 출처 값이
+        // ohlcv_1m 과 다를 수 있어 건드리지 않는다. 이력에도 실제 사용한 출처를 저장한다.
+        String source = (requestedSource == null || requestedSource.isBlank()) && "1m".equals(interval)
+                ? symbolSourceResolver.latestSource(symbol).orElse(requestedSource)
+                : requestedSource;
         try {
             long startedNanos = System.nanoTime();
             JsonNode response = client.get()

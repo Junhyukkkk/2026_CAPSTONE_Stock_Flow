@@ -3,6 +3,7 @@ package com.stockflow.realtime.prediction;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stockflow.realtime.prediction.PredictionService.PredictionServiceException;
+import com.stockflow.realtime.stock.SymbolSourceResolver;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,6 +13,7 @@ import org.springframework.web.client.RestClient;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,6 +27,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 class PredictionServiceHistoryTest {
 
@@ -35,12 +38,16 @@ class PredictionServiceHistoryTest {
     private final AtomicInteger status = new AtomicInteger(200);
     private volatile String body = BODY;
     private PredictionHistoryRecorder recorder;
+    private SymbolSourceResolver resolver;
+    private volatile String lastQuery;
 
     @BeforeEach
     void setUp() throws Exception {
         recorder = mock(PredictionHistoryRecorder.class);
+        resolver = mock(SymbolSourceResolver.class);
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/predict", exchange -> {
+            lastQuery = exchange.getRequestURI().getRawQuery();
             byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             if (bytes.length == 0) {
@@ -62,7 +69,7 @@ class PredictionServiceHistoryTest {
     private PredictionService service(boolean historyEnabled) {
         return new PredictionService(RestClient.builder(),
                 "http://127.0.0.1:" + server.getAddress().getPort(), 1000, 5000,
-                recorder, historyEnabled);
+                recorder, historyEnabled, resolver);
     }
 
     @Test
@@ -112,5 +119,42 @@ class PredictionServiceHistoryTest {
                         e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_GATEWAY));
 
         verify(recorder, never()).record(any(), any(), anyInt(), any(), any(), anyLong());
+    }
+
+    @Test
+    void source가_없으면_서버가_고른_출처가_분석_호출과_이력에_쓰인다() {
+        when(resolver.latestSource("aapl")).thenReturn(Optional.of("ALPACA"));
+
+        JsonNode result = service(true).compare("aapl", "1m", 3, null);
+
+        assertThat(lastQuery).contains("source=ALPACA");
+        verify(recorder).record(eq("aapl"), eq("1m"), eq(3), eq("ALPACA"), eq(result), anyLong());
+    }
+
+    @Test
+    void 명시한_source는_resolver를_거치지_않고_우선한다() {
+        JsonNode result = service(true).compare("aapl", "1m", 3, "SIMULATOR");
+
+        assertThat(lastQuery).contains("source=SIMULATOR");
+        verifyNoInteractions(resolver);
+        verify(recorder).record(eq("aapl"), eq("1m"), eq(3), eq("SIMULATOR"), eq(result), anyLong());
+    }
+
+    @Test
+    void resolver가_비어_있으면_기존처럼_출처_없이_호출한다() {
+        when(resolver.latestSource("aapl")).thenReturn(Optional.empty());
+
+        JsonNode result = service(true).compare("aapl", "1m", 3, " ");
+
+        assertThat(lastQuery).doesNotContain("source");
+        verify(recorder).record(eq("aapl"), eq("1m"), eq(3), eq(" "), eq(result), anyLong());
+    }
+
+    @Test
+    void 일봉은_출처를_자동으로_정하지_않는다() {
+        service(true).compare("aapl", "1d", 3, null);
+
+        assertThat(lastQuery).doesNotContain("source");
+        verifyNoInteractions(resolver);
     }
 }

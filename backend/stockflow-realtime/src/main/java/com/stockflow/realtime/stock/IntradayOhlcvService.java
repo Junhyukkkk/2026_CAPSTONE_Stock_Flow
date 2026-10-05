@@ -82,17 +82,27 @@ public class IntradayOhlcvService {
             """;
 
     private final JdbcTemplate jdbcTemplate;
+    private final SymbolSourceResolver symbolSourceResolver;
 
     public List<IntradayOhlcvResponse> getIntraday(String symbol, String interval, Instant from, Instant to) {
-        return getIntraday(symbol, interval, from, to, null);
+        return query(symbol, interval, from, to, null);
     }
 
     /**
-     * @param source 데이터 출처(ohlcv_1m/market_ticks 의 source, 예: ALPACA·SIMULATOR·BINANCE). null/blank 면 출처 무관.
-     *               같은 심볼이 여러 출처로 저장될 수 있어, 지정하지 않으면 출처가 한 캔들에 섞인다.
+     * @param source 데이터 출처(ohlcv_1m/market_ticks 의 source, 예: ALPACA·SIMULATOR·BINANCE). 명시하면 항상 우선한다.
+     *               null/blank 면 서버가 최근 봉이 들어온 출처를 골라 쓴다(없으면 출처 무관). 같은 심볼이 여러
+     *               출처로 저장될 수 있어, 필터가 없으면 출처가 한 캔들에 섞인다.
      */
     public List<IntradayOhlcvResponse> getIntraday(String symbol, String interval, Instant from, Instant to,
                                                    String source) {
+        String effective = source == null || source.isBlank()
+                ? symbolSourceResolver.latestSource(symbol).orElse(null)
+                : source;
+        return query(symbol, interval, from, to, effective);
+    }
+
+    private List<IntradayOhlcvResponse> query(String symbol, String interval, Instant from, Instant to,
+                                              String source) {
         Integer bucketSeconds = INTERVAL_SECONDS.get(interval);
         if (bucketSeconds == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,

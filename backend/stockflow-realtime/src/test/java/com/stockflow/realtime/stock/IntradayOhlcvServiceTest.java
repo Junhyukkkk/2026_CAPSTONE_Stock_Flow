@@ -5,14 +5,19 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /** 출처(source) 필터가 ohlcv_1m·틱 보충·cutoff 서브쿼리에 모두 바인드 파라미터로 들어가는지 검증한다. */
@@ -22,6 +27,7 @@ class IntradayOhlcvServiceTest {
     private static final Instant FROM = TO.minusSeconds(3600);
 
     private JdbcTemplate jdbc;
+    private SymbolSourceResolver resolver;
     private IntradayOhlcvService service;
     private String sql;
     private Object[] args;
@@ -37,7 +43,8 @@ class IntradayOhlcvServiceTest {
                     ? array : Arrays.copyOfRange(raw, 2, raw.length);
             return List.of();
         });
-        service = new IntradayOhlcvService(jdbc);
+        resolver = mock(SymbolSourceResolver.class);
+        service = new IntradayOhlcvService(jdbc, resolver);
     }
 
     @Test
@@ -66,6 +73,16 @@ class IntradayOhlcvServiceTest {
         assertThat(args[6]).isEqualTo("ALPACA");
         assertThat(args[9]).isEqualTo("AAPL");
         assertThat(args[10]).isEqualTo("ALPACA");
+        // 틱 보충 하한은 end-30분(from 보다 뒤), 나머지는 from/to
+        Timestamp start = Timestamp.from(FROM);
+        Timestamp end = Timestamp.from(TO);
+        assertThat(args[0]).isEqualTo(start);
+        assertThat(args[3]).isEqualTo(start);
+        assertThat(args[4]).isEqualTo(end);
+        assertThat(args[7]).isEqualTo(start);
+        assertThat(args[8]).isEqualTo(end);
+        assertThat(args[11]).isEqualTo(Timestamp.from(TO.minusSeconds(1800)));
+        assertThat(args[12]).isEqualTo(end);
         assertThat(args[args.length - 2]).isEqualTo(300);
         assertThat(args[args.length - 1]).isEqualTo(300);
     }
@@ -90,6 +107,44 @@ class IntradayOhlcvServiceTest {
 
         assertThat(capturedSql()).doesNotContain("source");
         assertThat(capturedArgs()).hasSize(12);
+    }
+
+    @Test
+    void sourceNull_asksResolverAndFiltersByItsAnswer() {
+        when(resolver.latestSource("aapl")).thenReturn(Optional.of("ALPACA"));
+
+        service.getIntraday("aapl", "1m", FROM, TO, null);
+
+        assertThat(countOf(capturedSql(), "symbol = ? AND source = ?")).isEqualTo(3);
+        assertThat(Arrays.asList(capturedArgs())).filteredOn("ALPACA"::equals).hasSize(3);
+    }
+
+    @Test
+    void explicitSource_winsAndResolverIsNotConsulted() {
+        when(resolver.latestSource("aapl")).thenReturn(Optional.of("ALPACA"));
+
+        service.getIntraday("aapl", "1m", FROM, TO, "simulator");
+
+        verifyNoInteractions(resolver);
+        assertThat(Arrays.asList(capturedArgs())).filteredOn("SIMULATOR"::equals).hasSize(3);
+    }
+
+    @Test
+    void resolverEmpty_keepsLegacySqlAndArgs() {
+        when(resolver.latestSource("aapl")).thenReturn(Optional.empty());
+
+        service.getIntraday("aapl", "1m", FROM, TO, null);
+
+        verify(resolver).latestSource("aapl");
+        assertThat(capturedSql()).doesNotContain("source");
+        assertThat(capturedArgs()).hasSize(12);
+    }
+
+    @Test
+    void fourArgOverload_neverConsultsResolver() {
+        service.getIntraday("btcusdt", "1m", FROM, TO);
+
+        verify(resolver, never()).latestSource(any());
     }
 
     private String capturedSql() {
