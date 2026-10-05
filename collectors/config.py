@@ -3,14 +3,37 @@
 환경 변수 또는 .env 파일에서 설정을 로드
 """
 import logging
+import math
 import os
-from typing import Optional
+from typing import Callable, List, Optional
 from dotenv import load_dotenv
 
 # .env 파일 로드
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# SIM_* 값 파싱 오류. 클래스 정의 시점에 예외로 죽지 않고 모아 두었다가
+# validate_simulator()가 한꺼번에 보고한다.
+_SIM_ENV_ERRORS: List[str] = []
+
+
+def _sim_env(name: str, default, cast: Callable):
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == '':
+        return default
+    try:
+        return cast(raw.strip())
+    except ValueError:
+        _SIM_ENV_ERRORS.append(f"{name}={raw!r} 형식이 올바르지 않습니다")
+        return default
+
+
+def _parse_bool(raw: str) -> bool:
+    lowered = raw.lower()
+    if lowered not in ('true', 'false'):
+        raise ValueError(raw)
+    return lowered == 'true'
 
 
 class Config:
@@ -47,6 +70,15 @@ class Config:
         'ALPACA_WEBSOCKET_URL', 
         'wss://stream.data.alpaca.markets/v2/iex'
     )
+
+    # 주식 시뮬레이터 설정 (stock_simulator.py) — 생성되는 체결은 모두 가짜 데이터(source=SIMULATOR)
+    SIM_SYMBOLS_FILE: str = os.getenv('SIM_SYMBOLS_FILE', 'simulator/universe.csv')
+    SIM_TOTAL_TPS: float = _sim_env('SIM_TOTAL_TPS', 300.0, float)  # 전 종목 합계 초당 체결 수
+    SIM_MARKET_HOURS: str = os.getenv('SIM_MARKET_HOURS', 'always').strip().lower()  # always | us
+    SIM_SEED: Optional[int] = _sim_env('SIM_SEED', None, int)
+    SIM_DRY_RUN: bool = _sim_env('SIM_DRY_RUN', False, _parse_bool)
+    SIM_TICK_INTERVAL_MS: int = _sim_env('SIM_TICK_INTERVAL_MS', 50, int)
+    SIM_PRICE_SOURCE: str = os.getenv('SIM_PRICE_SOURCE', 'static').strip().lower()  # static | alpaca | auto
 
     # DLQ 설정
     DLQ_TOPIC_NAME: str = os.getenv('DLQ_TOPIC_NAME', 'market.dlq')
@@ -101,6 +133,31 @@ class Config:
         
         return True
     
+    @classmethod
+    def validate_simulator(cls) -> bool:
+        """SIM_* 설정 검증 (시뮬레이터 기동 시에만 호출 — 다른 수집기는 SIM_* 오류와 무관하게 기동)"""
+        errors = list(_SIM_ENV_ERRORS)
+
+        if not cls.SIM_SYMBOLS_FILE:
+            errors.append("SIM_SYMBOLS_FILE이 비어 있습니다")
+        if not (math.isfinite(cls.SIM_TOTAL_TPS) and cls.SIM_TOTAL_TPS > 0):
+            errors.append(f"SIM_TOTAL_TPS는 0보다 큰 유한한 수여야 합니다 (현재: {cls.SIM_TOTAL_TPS})")
+        if cls.SIM_MARKET_HOURS not in ('always', 'us'):
+            errors.append(f"SIM_MARKET_HOURS는 always 또는 us 여야 합니다 (현재: {cls.SIM_MARKET_HOURS!r})")
+        if not (1 <= cls.SIM_TICK_INTERVAL_MS <= 10000):
+            errors.append(f"SIM_TICK_INTERVAL_MS는 1~10000 이어야 합니다 (현재: {cls.SIM_TICK_INTERVAL_MS})")
+        if cls.SIM_PRICE_SOURCE not in ('static', 'alpaca', 'auto'):
+            errors.append(
+                f"SIM_PRICE_SOURCE는 static, alpaca, auto 중 하나여야 합니다 (현재: {cls.SIM_PRICE_SOURCE!r})"
+            )
+
+        if errors:
+            for error in errors:
+                print(f"❌ 설정 오류: {error}")
+            return False
+
+        return True
+
     @classmethod
     def get_kafka_producer_config(cls, client_id_suffix: str) -> dict:
         """Kafka Producer 설정 딕셔너리 반환"""
