@@ -35,6 +35,10 @@ public final class JdbcTestSupport {
             if ("next".equals(method)) {
                 return hasNext.getAndSet(false);
             }
+            if (args.length == 2 && "getObject".equals(method) && args[0] instanceof String column2) {
+                Object typed = columns.get(column2);
+                return typed == null ? null : args[1] == Long.class ? ((Number) typed).longValue() : typed;
+            }
             if (args.length != 1 || !(args[0] instanceof String column)) {
                 return Mockito.RETURNS_DEFAULTS.answer(inv);
             }
