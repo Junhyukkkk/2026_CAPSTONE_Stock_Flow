@@ -8,7 +8,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisStringCommands;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.types.Expiration;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.math.BigDecimal;
@@ -103,7 +109,7 @@ class IdempotencyServiceTest {
         verify(valueOperations, times(1)).set(
                 anyString(),
                 eq("1"),
-                eq(86400L),
+                eq(600L),
                 eq(TimeUnit.SECONDS)
         );
     }
@@ -120,8 +126,72 @@ class IdempotencyServiceTest {
         verify(valueOperations, times(5)).set(
                 anyString(),
                 eq("1"),
-                eq(86400L),
+                eq(600L),
                 eq(TimeUnit.SECONDS)
         );
+    }
+
+    @Test
+    void ttlDefaultsTo600() {
+        assertEquals(600L, ReflectionTestUtils.getField(idempotencyService, "ttlSeconds"));
+    }
+
+    @Test
+    void validateTtl_acceptsPositiveValues() {
+        assertDoesNotThrow(() -> idempotencyService.validateTtl());
+
+        ReflectionTestUtils.setField(idempotencyService, "ttlSeconds", 86400L);
+        assertDoesNotThrow(() -> idempotencyService.validateTtl());
+    }
+
+    @Test
+    void validateTtl_rejectsZeroAndNegative() {
+        for (long bad : new long[]{0L, -1L}) {
+            ReflectionTestUtils.setField(idempotencyService, "ttlSeconds", bad);
+
+            IllegalArgumentException e =
+                    assertThrows(IllegalArgumentException.class, () -> idempotencyService.validateTtl());
+            assertTrue(e.getMessage().contains("STOCKFLOW_IDEMPOTENCY_TTL_SECONDS"));
+            assertTrue(e.getMessage().contains(String.valueOf(bad)));
+        }
+    }
+
+    @Test
+    void ttlOverride_appliesToSingleMark() {
+        ReflectionTestUtils.setField(idempotencyService, "ttlSeconds", 3600L);
+
+        idempotencyService.markAsProcessed(CH, testTrade);
+
+        verify(valueOperations, times(1)).set(anyString(), eq("1"), eq(3600L), eq(TimeUnit.SECONDS));
+    }
+
+    @Test
+    void ttlOverride_appliesToBatchMark() {
+        ReflectionTestUtils.setField(idempotencyService, "ttlSeconds", 3600L);
+
+        idempotencyService.markBatchAsProcessed(CH, List.of(testTrade, testTrade));
+
+        verify(valueOperations, times(2)).set(anyString(), eq("1"), eq(3600L), eq(TimeUnit.SECONDS));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void ttlOverride_appliesToPipelinedBatchMark() {
+        when(opt.isStorageIdempotencyPipeline()).thenReturn(true);
+        ReflectionTestUtils.setField(idempotencyService, "ttlSeconds", 3600L);
+
+        idempotencyService.markBatchAsProcessed(CH, List.of(testTrade));
+
+        ArgumentCaptor<RedisCallback<Object>> captor = ArgumentCaptor.forClass(RedisCallback.class);
+        verify(redisTemplate).executePipelined(captor.capture());
+
+        RedisConnection connection = mock(RedisConnection.class);
+        RedisStringCommands stringCommands = mock(RedisStringCommands.class);
+        when(connection.stringCommands()).thenReturn(stringCommands);
+        captor.getValue().doInRedis(connection);
+
+        ArgumentCaptor<Expiration> expiration = ArgumentCaptor.forClass(Expiration.class);
+        verify(stringCommands).set(any(byte[].class), any(byte[].class), expiration.capture(), any());
+        assertEquals(3600L, expiration.getValue().getExpirationTimeInSeconds());
     }
 }

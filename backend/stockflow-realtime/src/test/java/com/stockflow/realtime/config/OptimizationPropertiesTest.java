@@ -22,6 +22,12 @@ class OptimizationPropertiesTest {
         assertThat(opt.isWsTaskExecutor()).as("wsTaskExecutor").isTrue();
     }
 
+    /** 새 개선안은 검증 전까지 꺼져 있어야 한다 — 플래그 미지정 시 동작이 기존과 같다. */
+    @Test
+    void realtimeBatchIsOffByDefault() {
+        assertThat(new OptimizationProperties().isRealtimeBatch()).isFalse();
+    }
+
     @Test
     void refreshAndTtlDefaultsAreOneMinute() {
         OptimizationProperties opt = new OptimizationProperties();

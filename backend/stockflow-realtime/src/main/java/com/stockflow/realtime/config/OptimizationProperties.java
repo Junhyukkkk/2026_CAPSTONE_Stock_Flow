@@ -39,4 +39,10 @@ public class OptimizationProperties {
 
     /** Redis Pub/Sub 리스너에 고정 스레드풀을 지정한다 (메시지당 스레드 생성 방지) */
     private boolean wsTaskExecutor = true;
+
+    /**
+     * 실시간 컨슈머가 poll 단위 배치로 소비한다 (심볼당 최신 1건만 파이프라인 1회로 SET+PUBLISH).
+     * 새 개선안이라 검증 전까지 기본 false — 켜면 단건 리스너 대신 배치 리스너만 realtime-group 을 구독한다.
+     */
+    private boolean realtimeBatch = false;
 }

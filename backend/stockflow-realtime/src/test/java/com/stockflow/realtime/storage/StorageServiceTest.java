@@ -12,6 +12,7 @@ import com.stockflow.realtime.transaction.IdempotencyService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -27,7 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -129,6 +132,54 @@ class StorageServiceTest {
         verify(instrumentRegistryService, times(1)).registerDistinctFromTrades(trades);
         verify(idempotencyService, times(1)).markBatchAsProcessed(IdempotencyChannels.STORAGE, trades);
         verifyNoInteractions(dlqService);
+    }
+
+    @Test
+    void saveBatch_success_marksOnceAfterInsert() {
+        storageService.saveBatch(trades, "storage-group");
+
+        InOrder order = inOrder(marketTickBulkWriter, instrumentRegistryService, idempotencyService);
+        order.verify(marketTickBulkWriter).insertBatch(trades);
+        order.verify(instrumentRegistryService).registerDistinctFromTrades(trades);
+        order.verify(idempotencyService).markBatchAsProcessed(IdempotencyChannels.STORAGE, trades);
+    }
+
+    @Test
+    void saveBatch_marksOutsideTransactionCallback() {
+        // 마킹은 트랜잭션 콜백(커넥션 점유 구간)이 끝난 뒤에 호출돼야 한다.
+        java.util.concurrent.atomic.AtomicBoolean inTx = new java.util.concurrent.atomic.AtomicBoolean(false);
+        java.util.concurrent.atomic.AtomicBoolean markedInTx = new java.util.concurrent.atomic.AtomicBoolean(false);
+        doAnswer(invocation -> {
+            Consumer<TransactionStatus> callback = invocation.getArgument(0);
+            inTx.set(true);
+            try {
+                callback.accept(null);
+            } finally {
+                inTx.set(false);
+            }
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
+        doAnswer(invocation -> {
+            markedInTx.set(inTx.get());
+            return null;
+        }).when(idempotencyService).markBatchAsProcessed(any(), any());
+
+        storageService.saveBatch(trades, "storage-group");
+
+        verify(idempotencyService, times(1)).markBatchAsProcessed(IdempotencyChannels.STORAGE, trades);
+        assertFalse(markedInTx.get());
+    }
+
+    @Test
+    void saveBatch_markFailureAfterCommit_isSwallowed_noRetryNoDlq() {
+        doThrow(new RuntimeException("redis down"))
+                .when(idempotencyService).markBatchAsProcessed(any(), any());
+
+        boolean result = storageService.saveBatch(trades, "storage-group");
+
+        assertTrue(result);
+        verify(marketTickBulkWriter, times(1)).insertBatch(trades);
+        verifyNoInteractions(dlqService, retryService);
     }
 
     @Test

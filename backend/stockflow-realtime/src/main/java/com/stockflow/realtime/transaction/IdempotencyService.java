@@ -2,8 +2,10 @@ package com.stockflow.realtime.transaction;
 
 import com.stockflow.core.dto.NormalizedTradeDTO;
 import com.stockflow.realtime.config.OptimizationProperties;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.connection.RedisStringCommands;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -23,10 +25,27 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class IdempotencyService {
 
-    private static final long DEFAULT_TTL_SECONDS = 86400; // 24시간
+    /** 기본 TTL(10분). env STOCKFLOW_IDEMPOTENCY_TTL_SECONDS 로 override(이전 기본값은 86400). */
+    static final long DEFAULT_TTL_SECONDS = 600;
 
     private final RedisTemplate<String, String> redisTemplate;
     private final OptimizationProperties opt;
+
+    /**
+     * 멱등 키 TTL(초). Redis 가 allkeys-lru 로 가득 차 있으면 키가 축출되므로 줄여 메모리 압박을 낮출 수 있다.
+     * DB 에 ON CONFLICT DO NOTHING 이 있어 이 키는 재전달 시 절약용일 뿐이다.
+     */
+    @Value("${stockflow.idempotency.ttl-seconds:600}")
+    private long ttlSeconds = DEFAULT_TTL_SECONDS;
+
+    /** TTL 0 이하는 Redis 가 SET EX 0 을 거부해 멱등성이 조용히 꺼지므로 기동 시점에 실패시킨다. */
+    @PostConstruct
+    void validateTtl() {
+        if (ttlSeconds <= 0) {
+            throw new IllegalArgumentException(
+                    "stockflow.idempotency.ttl-seconds (STOCKFLOW_IDEMPOTENCY_TTL_SECONDS) must be > 0 but was " + ttlSeconds);
+        }
+    }
 
     /**
      * DB 유니크 키 (symbol, source, trade_id, ts) 와 동일 축 — trade_ts는 epoch ms.
@@ -54,7 +73,7 @@ public class IdempotencyService {
     }
 
     public void markAsProcessed(String channel, NormalizedTradeDTO trade) {
-        markAsProcessed(channel, trade, DEFAULT_TTL_SECONDS);
+        markAsProcessed(channel, trade, ttlSeconds);
     }
 
     /**
@@ -103,7 +122,7 @@ public class IdempotencyService {
         }
 
         if (opt.isStorageIdempotencyPipeline()) {
-            Expiration ttl = Expiration.seconds(DEFAULT_TTL_SECONDS);
+            Expiration ttl = Expiration.seconds(ttlSeconds);
             byte[] one = "1".getBytes(StandardCharsets.UTF_8);
             redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
                 for (NormalizedTradeDTO trade : trades) {
