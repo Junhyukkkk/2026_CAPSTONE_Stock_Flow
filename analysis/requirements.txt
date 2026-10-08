@@ -12,3 +12,5 @@ python-dotenv==1.0.1
 chronos-forecasting==2.3.1
 # 서버는 GPU가 없으므로 CUDA 번들 대신 CPU wheel을 고정한다.
 torch==2.5.1+cpu
+# 모델 경쟁(app/research): 그래디언트 부스팅
+lightgbm==4.5.0
